@@ -6,6 +6,7 @@ die() { printf '[kernel-rpm-validate] ERROR: %s\n' "$*" >&2; exit 1; }
 
 RPM_DIR="${1:-artifacts/kernel-rpms}"
 ROOT_FSTYPE="${KERNEL_ROOT_FSTYPE:-xfs}"
+REQUIRE_LVM_INITRAMFS="${KERNEL_REQUIRE_LVM_INITRAMFS:-1}"
 
 if command -v rpm2cpio >/dev/null 2>&1; then
   EXTRACTOR="rpm2cpio"
@@ -37,6 +38,18 @@ require_builtin_or_module() {
   local symbol="$2"
   if ! grep -Eq "^${symbol}=(y|m)$" "$config"; then
     die "Missing required kernel option ${symbol}=y/m in $config"
+  fi
+}
+
+initramfs_contains() {
+  local initramfs="$1"
+  local pattern="$2"
+  if command -v lsinitrd >/dev/null 2>&1; then
+    lsinitrd "$initramfs" | grep -Eq "$pattern"
+  elif command -v bsdtar >/dev/null 2>&1; then
+    bsdtar -tf "$initramfs" | grep -Eq "$pattern"
+  else
+    die "lsinitrd or bsdtar is required to inspect initramfs contents"
   fi
 }
 
@@ -80,11 +93,15 @@ validate_rpm() {
   if grep -q '^CONFIG_SCSI_VIRTIO=y$' "$config"; then
     :
   elif grep -q '^CONFIG_SCSI_VIRTIO=m$' "$config"; then
-    command -v lsinitrd >/dev/null 2>&1 || die "lsinitrd is required when CONFIG_SCSI_VIRTIO=m"
-    lsinitrd "$initramfs" | grep -q 'virtio_scsi' || \
+    initramfs_contains "$initramfs" 'virtio_scsi' || \
       die "CONFIG_SCSI_VIRTIO=m but virtio_scsi is missing from /boot/initramfs-${release}.img"
   else
     die "Missing CONFIG_SCSI_VIRTIO=y/m for Proxmox virtio-scsi boot"
+  fi
+
+  if [[ "$REQUIRE_LVM_INITRAMFS" == "1" ]]; then
+    initramfs_contains "$initramfs" '(^|/)(lvm|lvm_scan|dmsetup)( |$)' || \
+      die "LVM initramfs support is required for the Fedora Proxmox template but is missing from /boot/initramfs-${release}.img"
   fi
 
   log "PASS: $(basename "$rpm") supports Proxmox virtio-scsi boot with $ROOT_FSTYPE root"

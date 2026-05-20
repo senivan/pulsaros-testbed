@@ -161,11 +161,19 @@
         exit 1
       fi
 
+      if grep -Eq '(^| )rd\.lvm\.lv=|(^| )root=/dev/(mapper|dm-)' <<<"${KERNEL_WORKING_ARGS}"; then
+        lsinitrd "$initramfs" | grep -Eq '(^|/)(lvm|lvm_scan|dmsetup)( |$)' || {
+          echo "Template boot args require LVM, but LVM support is missing from $initramfs" >&2
+          exit 1
+        }
+      fi
+
       echo "Custom kernel $expected has boot support for root filesystem $root_fstype"
   args:
     executable: /bin/bash
   environment:
     KERNEL_ROOT_FSTYPE: "{{ kernel_root_fstype.stdout }}"
+    KERNEL_WORKING_ARGS: "{{ kernel_working_args.stdout }}"
   when: kernel_source != 'none'
 
 - name: Reboot into custom kernel
