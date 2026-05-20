@@ -53,6 +53,11 @@ on:
       kernel_rpm_url:
         description: "Optional direct kernel RPM URL when kernel_source=rpm-url"
         required: false
+      keep_vms_on_failure:
+        description: "Leave generated VMs running when the testbed job fails"
+        required: true
+        default: false
+        type: boolean
 
 concurrency:
   group: proxmox-pulsaros-testbed
@@ -195,7 +200,7 @@ jobs:
         run: ./scripts/pve-collect-logs.sh "$RUN_ID"
 
       - name: Destroy testbed
-        if: always()
+        if: ${{ always() && (!failure() || !inputs.keep_vms_on_failure) }}
         run: ./scripts/pve-destroy-run.sh "$RUN_ID"
 
       - name: Upload artifacts

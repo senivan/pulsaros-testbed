@@ -126,7 +126,7 @@ Flow:
 ubuntu-latest builds RPMs from PulsarOS-kernel
 self-hosted Proxmox runner downloads RPM artifact
 Ansible copies RPMs to all VMs
-VMs install RPMs, select the PulsarOS kernel, reboot, and verify uname -r
+VMs install RPMs, rewrite the PulsarOS kernel boot entry with the template kernel's known-good root arguments, reboot, and verify uname -r
 scenario tests run against the custom kernel
 ```
 
@@ -137,6 +137,16 @@ export KERNEL_SOURCE=pulsaros-kernel-git
 export KERNEL_EXPECTED_RELEASE=pulsaros
 make provision
 ```
+
+The testbed intentionally overrides root-related boot arguments on the installed PulsarOS kernel. This avoids inheriting package defaults like `rootfstype=ext4` when the Fedora template actually boots from another filesystem such as btrfs or xfs.
+
+For kernel boot debugging, set:
+
+```text
+keep_vms_on_failure=true
+```
+
+When a custom kernel panics or SSH never returns, the workflow will collect what it can and leave the generated VMs available for Proxmox console inspection. Clean them up manually with `RUN_ID=<run-id> make destroy` after debugging.
 
 ## Triggering From Another Repository Later
 

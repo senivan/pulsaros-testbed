@@ -45,6 +45,30 @@
   register: kernel_before
   changed_when: false
 
+- name: Capture current working boot arguments
+  ansible.builtin.shell: |
+    set -euo pipefail
+    grubby --info=DEFAULT | awk '
+      /^args="/ {
+        value=$0
+        sub(/^args="/, "", value)
+        sub(/"$/, "", value)
+        print value
+        exit
+      }
+    '
+  args:
+    executable: /bin/bash
+  register: kernel_working_args
+  changed_when: false
+  when: kernel_source != 'none'
+
+- name: Capture current root filesystem type
+  ansible.builtin.command: findmnt -n -o FSTYPE /
+  register: kernel_root_fstype
+  changed_when: false
+  when: kernel_source != 'none'
+
 - name: Install custom kernel RPMs
   ansible.builtin.shell: |
     set -euo pipefail
@@ -54,17 +78,31 @@
   when: kernel_source != 'none'
 
 - name: Select latest PulsarOS kernel as default
-  ansible.builtin.shell: |
-    set -euo pipefail
-    latest="$(find /boot -maxdepth 1 -name 'vmlinuz-*pulsaros*' -printf '%f\n' | sed 's/^vmlinuz-//' | sort -V | tail -n1)"
-    if [ -z "$latest" ]; then
-      echo "No /boot/vmlinuz-*pulsaros* kernel found after RPM install" >&2
-      exit 1
-    fi
-    grubby --set-default "/boot/vmlinuz-${latest}"
-    echo "$latest" > /tmp/pulsaros-expected-kernel-release
+  ansible.builtin.shell:
+    cmd: |
+      set -euo pipefail
+      latest="$(find /boot -maxdepth 1 -name 'vmlinuz-*pulsaros*' -printf '%f\n' | sed 's/^vmlinuz-//' | sort -V | tail -n1)"
+      if [ -z "$latest" ]; then
+        echo "No /boot/vmlinuz-*pulsaros* kernel found after RPM install" >&2
+        exit 1
+      fi
+      kernel="/boot/vmlinuz-${latest}"
+      working_args="${KERNEL_WORKING_ARGS}"
+      root_fstype="${KERNEL_ROOT_FSTYPE}"
+      extra_args="hugepagesz=2M default_hugepagesz=2M rootwait console=tty0 console=ttyS0,115200n8"
+      # The kernel RPM may add rootfstype=ext4 unconditionally. Reuse the
+      # template kernel's known-good root args so Fedora btrfs/xfs templates boot.
+      grubby --update-kernel "$kernel" \
+        --remove-args "root rootfstype rootflags ro rw resume rd.luks.uuid rd.lvm.lv rd.md.uuid rd.dm.uuid" \
+        --args "$working_args $extra_args"
+      grubby --set-default "$kernel"
+      echo "Selected $latest with root filesystem ${root_fstype}"
+      echo "$latest" > /tmp/pulsaros-expected-kernel-release
   args:
     executable: /bin/bash
+  environment:
+    KERNEL_WORKING_ARGS: "{{ kernel_working_args.stdout }}"
+    KERNEL_ROOT_FSTYPE: "{{ kernel_root_fstype.stdout }}"
   when: kernel_source != 'none'
 
 - name: Reboot into custom kernel

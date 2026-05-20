@@ -53,6 +53,7 @@ for entry in \
   collect_cmd "$host" "$ip" ip-addr "ip addr"
   collect_cmd "$host" "$ip" uname "uname -a"
   collect_cmd "$host" "$ip" kernel-rpms "rpm -qa 'kernel*' | sort || true"
+  collect_cmd "$host" "$ip" kernel-boot "sudo grubby --info=DEFAULT || true; findmnt / || true; cat /proc/cmdline || true"
 done
 
 copy_pcap vtep-a "${VTEP_A_IP:-}" /tmp/pulsaros-testbed/vtep-a-underlay.pcap pcaps/vtep-a-underlay.pcap
