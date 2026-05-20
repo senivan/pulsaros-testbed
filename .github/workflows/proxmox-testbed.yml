@@ -130,6 +130,9 @@ jobs:
           rpm -qp --queryformat '%{NAME} %{VERSION}-%{RELEASE} %{ARCH}\n' artifacts/kernel-rpms/*.rpm \
             > artifacts/kernel-rpms/kernel-rpms.txt
 
+      - name: Validate kernel RPM boot support
+        run: ./scripts/validate-kernel-rpm.sh artifacts/kernel-rpms
+
       - name: Upload kernel RPM artifact
         uses: actions/upload-artifact@v4
         with:
