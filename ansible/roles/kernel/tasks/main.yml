@@ -54,7 +54,6 @@
         sub(/^args="/, "", value)
         sub(/"$/, "", value)
         print value
-        exit
       }
     '
   args:
