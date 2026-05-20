@@ -1,4 +1,4 @@
-.PHONY: preflight create wait-ssh inventory provision scenario logs destroy clean-stale
+.PHONY: preflight create wait-ssh inventory provision scenario logs analyze destroy clean-stale
 
 preflight:
 	./scripts/pve-preflight.sh
@@ -20,6 +20,9 @@ scenario:
 
 logs:
 	./scripts/pve-collect-logs.sh "$${RUN_ID}"
+
+analyze:
+	./scripts/analyze-artifacts-gemini.py
 
 destroy:
 	./scripts/pve-destroy-run.sh "$${RUN_ID}"

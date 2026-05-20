@@ -91,3 +91,37 @@ jobs:
             logs/
             pcaps/
             junit/
+
+  analyze-artifacts:
+    if: always()
+    needs: testbed
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    env:
+      SCENARIO: ${{ inputs.scenario }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      GEMINI_MODEL: ${{ vars.GEMINI_MODEL || 'gemini-2.5-flash' }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download testbed artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: pulsaros-proxmox-testbed-${{ github.run_id }}
+          path: .
+
+      - name: Analyze downloaded artifacts with Gemini
+        continue-on-error: true
+        run: ./scripts/analyze-artifacts-gemini.py
+
+      - name: Upload AI analysis
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pulsaros-proxmox-testbed-ai-analysis-${{ github.run_id }}
+          path: |
+            artifacts/ai-analysis.md
+            artifacts/ai-analysis-input.json

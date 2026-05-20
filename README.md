@@ -139,3 +139,24 @@ The cleanup scripts only target generated names like `pulsar-<run-id>-client-a`.
 - `logs/`: dmesg, journal, ip link, ip addr, and uname output.
 - `pcaps/`: VXLAN underlay captures from VTEPs.
 - `junit/`: pytest JUnit XML reports.
+- `artifacts/ai-analysis.md`: local artifact summary plus optional Gemini analysis.
+
+## Gemini Artifact Analysis
+
+The workflow uploads raw testbed artifacts first, then a separate `analyze-artifacts` job runs on a GitHub-hosted `ubuntu-latest` runner. That job downloads the uploaded artifacts, runs `scripts/analyze-artifacts-gemini.py`, and uploads a separate AI analysis artifact.
+
+The analyzer always writes a local summary to `artifacts/ai-analysis.md`.
+
+To enable Gemini analysis, add a repository secret:
+
+```text
+GEMINI_API_KEY
+```
+
+Optionally set a repository variable:
+
+```text
+GEMINI_MODEL=gemini-2.5-flash
+```
+
+If no API key is configured, the analyzer skips the model call and the workflow continues.
