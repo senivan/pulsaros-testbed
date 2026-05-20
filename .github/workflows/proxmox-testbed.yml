@@ -77,6 +77,9 @@ jobs:
       CCACHE_DIR: ${{ github.workspace }}/.ccache
 
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Install kernel build dependencies
         run: |
           sudo apt-get update
