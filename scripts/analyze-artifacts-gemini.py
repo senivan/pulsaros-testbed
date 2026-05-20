@@ -21,6 +21,7 @@ JUNIT = ROOT / "junit"
 REPORT_MD = ARTIFACTS / "ai-analysis.md"
 REPORT_JSON = ARTIFACTS / "ai-analysis-input.json"
 DEFAULT_MODEL = "gemini-2.5-flash"
+DEFAULT_MAX_OUTPUT_TOKENS = 4096
 MAX_LOG_CHARS = 4000
 
 
@@ -169,7 +170,8 @@ def gemini_prompt(data: dict) -> str:
         "as a misconfiguration; that is expected. If JUnit reports zero "
         "failures and pcap files are present and non-empty, state that the run "
         "appears successful and only list low-confidence observations under a "
-        "separate caveats section.\n\n"
+        "separate caveats section. Keep the response under 800 words and end "
+        "with a complete sentence.\n\n"
         f"Artifact summary JSON:\n{json.dumps(data, indent=2)[:50000]}"
     )
 
@@ -180,6 +182,7 @@ def call_gemini(data: dict) -> str:
         return "Gemini analysis skipped: `GEMINI_API_KEY` is not set.\n"
 
     model = os.environ.get("GEMINI_MODEL", DEFAULT_MODEL)
+    max_output_tokens = int(os.environ.get("GEMINI_MAX_OUTPUT_TOKENS", DEFAULT_MAX_OUTPUT_TOKENS))
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
     body = {
         "contents": [
@@ -190,7 +193,7 @@ def call_gemini(data: dict) -> str:
         ],
         "generationConfig": {
             "temperature": 0.2,
-            "maxOutputTokens": 2048,
+            "maxOutputTokens": max_output_tokens,
         },
     }
     request = urllib.request.Request(
@@ -211,9 +214,30 @@ def call_gemini(data: dict) -> str:
     except Exception as exc:  # noqa: BLE001 - report fail-soft analyzer errors.
         return f"Gemini analysis failed: {type(exc).__name__}: {exc}\n"
 
-    parts = payload.get("candidates", [{}])[0].get("content", {}).get("parts", [])
+    candidate = payload.get("candidates", [{}])[0]
+    parts = candidate.get("content", {}).get("parts", [])
     text = "\n".join(part.get("text", "") for part in parts if part.get("text"))
-    return text.strip() + "\n" if text.strip() else "Gemini analysis returned no text.\n"
+    if not text.strip():
+        return "Gemini analysis returned no text.\n"
+
+    finish_reason = candidate.get("finishReason", "")
+    if finish_reason == "MAX_TOKENS":
+        text += (
+            "\n\n> Warning: Gemini stopped because it reached "
+            f"`GEMINI_MAX_OUTPUT_TOKENS={max_output_tokens}`. Increase that "
+            "workflow variable if the analysis is still truncated."
+        )
+    return text.strip() + "\n"
+
+
+def write_step_summary(report: str) -> None:
+    summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+    if not summary_path:
+        return
+    with pathlib.Path(summary_path).open("a", encoding="utf-8") as handle:
+        handle.write(report)
+        if not report.endswith("\n"):
+            handle.write("\n")
 
 
 def main() -> int:
@@ -223,6 +247,7 @@ def main() -> int:
     report += "\n## Gemini Analysis\n\n"
     report += call_gemini(data)
     REPORT_MD.write_text(report, encoding="utf-8")
+    write_step_summary(report)
     print(f"Wrote {REPORT_MD.relative_to(ROOT)}")
     print(f"Wrote {REPORT_JSON.relative_to(ROOT)}")
     return 0

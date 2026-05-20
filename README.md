@@ -157,6 +157,7 @@ Optionally set a repository variable:
 
 ```text
 GEMINI_MODEL=gemini-2.5-flash
+GEMINI_MAX_OUTPUT_TOKENS=4096
 ```
 
-If no API key is configured, the analyzer skips the model call and the workflow continues.
+If no API key is configured, the analyzer skips the model call and the workflow continues. The analysis is also written to the GitHub Actions job summary for the `analyze-artifacts` job, so you can read it without downloading the artifact archive.
