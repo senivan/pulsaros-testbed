@@ -1,10 +1,89 @@
 ---
-- name: Report kernel RPM handling when no URL is provided
-  ansible.builtin.debug:
-    msg: "KERNEL_RPM_URL is not set; keeping template kernel for v1."
-  when: lookup('ansible.builtin.env', 'KERNEL_RPM_URL') | length == 0
+- name: Determine staged kernel RPMs on runner
+  ansible.builtin.find:
+    paths: "{{ playbook_dir }}/../artifacts/kernel-rpms"
+    patterns: "*.rpm"
+  delegate_to: localhost
+  become: false
+  run_once: true
+  register: staged_kernel_rpms
 
-- name: Kernel RPM install placeholder
+- name: Record custom kernel source
+  ansible.builtin.set_fact:
+    kernel_source: "{{ lookup('ansible.builtin.env', 'KERNEL_SOURCE') | default('none', true) }}"
+    kernel_expected_release: "{{ lookup('ansible.builtin.env', 'KERNEL_EXPECTED_RELEASE') | default('', true) }}"
+
+- name: Report template kernel path
   ansible.builtin.debug:
-    msg: "KERNEL_RPM_URL is set, but automated kernel RPM installation is intentionally a v1 stub."
-  when: lookup('ansible.builtin.env', 'KERNEL_RPM_URL') | length > 0
+    msg: "KERNEL_SOURCE=none; keeping template kernel."
+  when: kernel_source == 'none'
+
+- name: Fail if custom kernel requested but no RPMs were staged
+  ansible.builtin.fail:
+    msg: "Custom kernel requested with KERNEL_SOURCE={{ kernel_source }}, but artifacts/kernel-rpms contains no RPMs."
+  when:
+    - kernel_source != 'none'
+    - staged_kernel_rpms.matched | int == 0
+
+- name: Create kernel RPM staging directory
+  ansible.builtin.file:
+    path: /tmp/pulsaros-kernel-rpms
+    state: directory
+    mode: "0755"
+  when: kernel_source != 'none'
+
+- name: Copy kernel RPMs to VM
+  ansible.builtin.copy:
+    src: "{{ item.path }}"
+    dest: "/tmp/pulsaros-kernel-rpms/{{ item.path | basename }}"
+    mode: "0644"
+  loop: "{{ staged_kernel_rpms.files }}"
+  when: kernel_source != 'none'
+
+- name: Capture current kernel release
+  ansible.builtin.command: uname -r
+  register: kernel_before
+  changed_when: false
+
+- name: Install custom kernel RPMs
+  ansible.builtin.shell: |
+    set -euo pipefail
+    dnf install -y /tmp/pulsaros-kernel-rpms/*.rpm
+  args:
+    executable: /bin/bash
+  when: kernel_source != 'none'
+
+- name: Select latest PulsarOS kernel as default
+  ansible.builtin.shell: |
+    set -euo pipefail
+    latest="$(find /boot -maxdepth 1 -name 'vmlinuz-*pulsaros*' -printf '%f\n' | sed 's/^vmlinuz-//' | sort -V | tail -n1)"
+    if [ -z "$latest" ]; then
+      echo "No /boot/vmlinuz-*pulsaros* kernel found after RPM install" >&2
+      exit 1
+    fi
+    grubby --set-default "/boot/vmlinuz-${latest}"
+    echo "$latest" > /tmp/pulsaros-expected-kernel-release
+  args:
+    executable: /bin/bash
+  when: kernel_source != 'none'
+
+- name: Reboot into custom kernel
+  ansible.builtin.reboot:
+    reboot_timeout: 600
+    connect_timeout: 10
+    test_command: uname -r
+  when: kernel_source != 'none'
+
+- name: Capture booted kernel release
+  ansible.builtin.command: uname -r
+  register: kernel_after
+  changed_when: false
+
+- name: Verify custom kernel release marker
+  ansible.builtin.assert:
+    that:
+      - kernel_after.stdout is search(kernel_expected_release)
+      - kernel_after.stdout != kernel_before.stdout
+    fail_msg: "Expected custom kernel containing '{{ kernel_expected_release }}' and different from '{{ kernel_before.stdout }}', got '{{ kernel_after.stdout }}'."
+    success_msg: "Booted custom kernel {{ kernel_after.stdout }}."
+  when: kernel_source != 'none'
