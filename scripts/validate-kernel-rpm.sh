@@ -42,7 +42,9 @@ require_builtin_or_module() {
 
 validate_rpm() {
   local rpm="$1"
+  local rpm_abs
   local tmpdir
+  rpm_abs="$(cd "$(dirname "$rpm")" && pwd)/$(basename "$rpm")"
   tmpdir="$(mktemp -d)"
   trap 'rm -rf "$tmpdir"' RETURN
 
@@ -50,9 +52,9 @@ validate_rpm() {
   (
     cd "$tmpdir"
     if [[ "$EXTRACTOR" == "rpm2cpio" ]]; then
-      rpm2cpio "$rpm" | cpio -id --quiet
+      rpm2cpio "$rpm_abs" | cpio -id --quiet
     else
-      bsdtar -xf "$rpm"
+      bsdtar -xf "$rpm_abs"
     fi
   )
 
