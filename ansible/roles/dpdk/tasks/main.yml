@@ -1,0 +1,24 @@
+---
+- name: Try to install DPDK package
+  ansible.builtin.package:
+    name: dpdk
+    state: present
+  register: dpdk_install
+  failed_when: false
+
+- name: Check for dpdk-testpmd
+  ansible.builtin.shell: command -v dpdk-testpmd
+  register: dpdk_testpmd
+  changed_when: false
+  failed_when: false
+
+- name: Check for testpmd
+  ansible.builtin.shell: command -v testpmd
+  register: testpmd
+  changed_when: false
+  failed_when: false
+
+- name: Warn if DPDK testpmd is unavailable
+  ansible.builtin.debug:
+    msg: "DPDK package/testpmd is unavailable on this distribution; dpdk-smoke will report DPDK unavailable."
+  when: dpdk_testpmd.rc != 0 and testpmd.rc != 0

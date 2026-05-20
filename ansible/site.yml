@@ -1,0 +1,20 @@
+---
+- name: Provision all testbed VMs
+  hosts: all
+  become: true
+  roles:
+    - common
+    - kernel
+
+- name: Provision VTEP dataplane prerequisites
+  hosts: vteps
+  become: true
+  roles:
+    - hugepages
+    - dpdk
+
+- name: Configure Linux VXLAN reference topology
+  hosts: all
+  become: true
+  roles:
+    - vxlan-test

@@ -1,0 +1,10 @@
+---
+- name: Report kernel RPM handling when no URL is provided
+  ansible.builtin.debug:
+    msg: "KERNEL_RPM_URL is not set; keeping template kernel for v1."
+  when: lookup('ansible.builtin.env', 'KERNEL_RPM_URL') | length == 0
+
+- name: Kernel RPM install placeholder
+  ansible.builtin.debug:
+    msg: "KERNEL_RPM_URL is set, but automated kernel RPM installation is intentionally a v1 stub."
+  when: lookup('ansible.builtin.env', 'KERNEL_RPM_URL') | length > 0

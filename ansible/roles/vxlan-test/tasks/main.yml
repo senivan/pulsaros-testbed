@@ -1,0 +1,81 @@
+---
+- name: Resolve client dataplane interface by MAC
+  ansible.builtin.shell: |
+    set -euo pipefail
+    for dev in /sys/class/net/*; do
+      if [ "$(cat "$dev/address")" = "{{ dataplane_mac | lower }}" ]; then
+        basename "$dev"
+        exit 0
+      fi
+    done
+    exit 1
+  args:
+    executable: /bin/bash
+  register: client_dataplane_if
+  changed_when: false
+  when: "'clients' in group_names"
+
+- name: Configure client dataplane interface
+  ansible.builtin.shell: |
+    set -euo pipefail
+    ip addr flush dev "{{ client_dataplane_if.stdout }}"
+    ip addr add "{{ dataplane_ip }}" dev "{{ client_dataplane_if.stdout }}"
+    ip link set "{{ client_dataplane_if.stdout }}" up
+  args:
+    executable: /bin/bash
+  changed_when: true
+  when: "'clients' in group_names"
+
+- name: Resolve VTEP left/right L2 interface by MAC
+  ansible.builtin.shell: |
+    set -euo pipefail
+    mac="{{ left_mac | default(right_mac) | lower }}"
+    for dev in /sys/class/net/*; do
+      if [ "$(cat "$dev/address")" = "$mac" ]; then
+        basename "$dev"
+        exit 0
+      fi
+    done
+    exit 1
+  args:
+    executable: /bin/bash
+  register: vtep_l2_if
+  changed_when: false
+  when: "'vteps' in group_names"
+
+- name: Resolve VTEP underlay interface by MAC
+  ansible.builtin.shell: |
+    set -euo pipefail
+    for dev in /sys/class/net/*; do
+      if [ "$(cat "$dev/address")" = "{{ underlay_mac | lower }}" ]; then
+        basename "$dev"
+        exit 0
+      fi
+    done
+    exit 1
+  args:
+    executable: /bin/bash
+  register: vtep_underlay_if
+  changed_when: false
+  when: "'vteps' in group_names"
+
+- name: Configure VTEP Linux VXLAN reference bridge
+  ansible.builtin.shell: |
+    set -euo pipefail
+    ip link del vxlan100 2>/dev/null || true
+    ip link del br-testbed 2>/dev/null || true
+    ip addr flush dev "{{ vtep_l2_if.stdout }}"
+    ip addr flush dev "{{ vtep_underlay_if.stdout }}"
+    ip addr add "{{ underlay_ip }}" dev "{{ vtep_underlay_if.stdout }}"
+    ip link set "{{ vtep_l2_if.stdout }}" up
+    ip link set "{{ vtep_underlay_if.stdout }}" up
+    ip link add br-testbed type bridge
+    ip link set br-testbed up
+    ip link set "{{ vtep_l2_if.stdout }}" master br-testbed
+    ip link add vxlan100 type vxlan id 100 local "{{ underlay_ip.split('/')[0] }}" remote "{{ vxlan_remote }}" dstport 4789 dev "{{ vtep_underlay_if.stdout }}"
+    ip link set vxlan100 master br-testbed
+    ip link set vxlan100 up
+  args:
+    executable: /bin/bash
+  changed_when: true
+  when: "'vteps' in group_names"

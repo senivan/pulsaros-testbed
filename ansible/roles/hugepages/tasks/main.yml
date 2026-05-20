@@ -1,0 +1,20 @@
+---
+- name: Configure temporary hugepages
+  ansible.builtin.command: sysctl -w vm.nr_hugepages=1024
+  changed_when: true
+
+- name: Create hugepage mountpoint
+  ansible.builtin.file:
+    path: /mnt/huge
+    state: directory
+    mode: "0755"
+
+- name: Mount hugetlbfs
+  ansible.builtin.command: mount -t hugetlbfs nodev /mnt/huge
+  register: huge_mount
+  changed_when: huge_mount.rc == 0
+  failed_when: false
+
+- name: Verify hugepages are configured
+  ansible.builtin.command: grep HugePages_Total /proc/meminfo
+  changed_when: false

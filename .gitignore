@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+artifacts/*
+!artifacts/.gitkeep
+logs/*
+!logs/.gitkeep
+pcaps/*
+!pcaps/.gitkeep
+junit/*
+!junit/.gitkeep

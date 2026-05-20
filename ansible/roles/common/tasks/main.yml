@@ -1,0 +1,13 @@
+---
+- name: Install common tools
+  ansible.builtin.package:
+    name:
+      - iproute
+      - tcpdump
+      - ethtool
+      - python3
+      - pytest
+      - rsync
+      - curl
+      - git
+    state: present

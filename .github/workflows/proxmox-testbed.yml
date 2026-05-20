@@ -1,0 +1,93 @@
+name: Proxmox PulsarOS Testbed
+
+on:
+  workflow_dispatch:
+    inputs:
+      scenario:
+        description: "Scenario to run"
+        required: true
+        default: "linux-vxlan-reference"
+        type: choice
+        options:
+          - kernel-smoke
+          - dpdk-smoke
+          - linux-vxlan-reference
+          - full
+      template_vmid:
+        description: "Proxmox template VMID"
+        required: true
+        default: "9000"
+      storage:
+        description: "Proxmox storage target"
+        required: true
+        default: "local-lvm"
+      mgmt_bridge:
+        description: "Management bridge"
+        required: true
+        default: "vmbr0"
+      test_bridge:
+        description: "VLAN-aware test bridge"
+        required: true
+        default: "vmbr-test"
+      kernel_rpm_url:
+        description: "Optional PulsarOS kernel RPM URL"
+        required: false
+
+concurrency:
+  group: proxmox-pulsaros-testbed
+  cancel-in-progress: false
+
+jobs:
+  testbed:
+    runs-on: [self-hosted, linux, proxmox, pulsaros-testbed]
+    timeout-minutes: 90
+
+    env:
+      RUN_ID: ${{ github.run_id }}
+      SCENARIO: ${{ inputs.scenario }}
+      TEMPLATE_ID: ${{ inputs.template_vmid }}
+      STORAGE: ${{ inputs.storage }}
+      MGMT_BRIDGE: ${{ inputs.mgmt_bridge }}
+      TEST_BRIDGE: ${{ inputs.test_bridge }}
+      KERNEL_RPM_URL: ${{ inputs.kernel_rpm_url }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Proxmox preflight
+        run: ./scripts/pve-preflight.sh
+
+      - name: Create Proxmox testbed VMs
+        run: ./scripts/pve-create-run.sh "$RUN_ID"
+
+      - name: Wait for SSH
+        run: ./scripts/pve-wait-ssh.sh "$RUN_ID"
+
+      - name: Generate inventory
+        run: ./scripts/pve-generate-inventory.sh "$RUN_ID"
+
+      - name: Provision VMs
+        run: ansible-playbook -i ansible/inventory.generated.ini ansible/site.yml
+
+      - name: Run scenario
+        run: ./scripts/pve-run-scenario.sh "$SCENARIO"
+
+      - name: Collect logs and pcaps
+        if: always()
+        run: ./scripts/pve-collect-logs.sh "$RUN_ID"
+
+      - name: Destroy testbed
+        if: always()
+        run: ./scripts/pve-destroy-run.sh "$RUN_ID"
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pulsaros-proxmox-testbed-${{ github.run_id }}
+          path: |
+            artifacts/
+            logs/
+            pcaps/
+            junit/
