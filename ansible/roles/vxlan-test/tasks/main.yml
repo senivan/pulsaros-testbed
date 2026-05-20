@@ -85,7 +85,6 @@
     ip link add vxlan100 type vxlan id 100 local "{{ underlay_ip.split('/')[0] }}" remote "{{ vxlan_remote }}" dstport 4789 dev "{{ vtep_underlay_if.stdout }}"
     ip link set vxlan100 master br-testbed
     ip link set vxlan100 up
-    bridge fdb replace 00:00:00:00:00:00 dev vxlan100 dst "{{ vxlan_remote }}" self
   args:
     executable: /bin/bash
   changed_when: true
