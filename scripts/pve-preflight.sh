@@ -13,13 +13,16 @@ need_env MGMT_BRIDGE
 need_env TEST_BRIDGE
 
 log "Checking required commands"
-for cmd in qm pvesh pvecm pvesm ansible-playbook pytest ssh scp jq df; do
+for cmd in qm pvesh pveversion pvesm ansible-playbook pytest ssh scp jq df; do
   need_cmd "$cmd"
 done
 
 log "Checking this looks like a Proxmox host"
 [[ -d /etc/pve ]] || die "/etc/pve not found"
-pvecm status >/dev/null 2>&1 || die "pvecm status failed"
+pveversion >/dev/null 2>&1 || die "pveversion failed"
+if command -v pvecm >/dev/null 2>&1; then
+  pvecm status >/dev/null 2>&1 || log "pvecm status failed; continuing because standalone Proxmox hosts are supported"
+fi
 
 log "Checking qm access"
 qm list >/dev/null 2>&1 || die "runner cannot call qm list"
