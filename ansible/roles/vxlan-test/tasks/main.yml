@@ -25,6 +25,7 @@
     ip addr flush dev "{{ client_dataplane_if.stdout }}"
     ip addr replace "{{ dataplane_ip }}" dev "{{ client_dataplane_if.stdout }}"
     ip link set "{{ client_dataplane_if.stdout }}" up
+    ip neigh replace "{{ peer_ip }}" lladdr "{{ peer_mac | lower }}" dev "{{ client_dataplane_if.stdout }}" nud permanent
   args:
     executable: /bin/bash
   changed_when: true
@@ -85,6 +86,7 @@
     ip link add vxlan100 type vxlan id 100 local "{{ underlay_ip.split('/')[0] }}" remote "{{ vxlan_remote }}" dstport 4789 dev "{{ vtep_underlay_if.stdout }}"
     ip link set vxlan100 master br-testbed
     ip link set vxlan100 up
+    bridge fdb replace "{{ remote_client_mac | lower }}" dev vxlan100 dst "{{ vxlan_remote }}" self
   args:
     executable: /bin/bash
   changed_when: true
