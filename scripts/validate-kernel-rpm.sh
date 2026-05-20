@@ -84,12 +84,16 @@ validate_rpm() {
 
   require_builtin_or_module "$config" CONFIG_BLK_DEV_INITRD
   require_builtin_or_module "$config" CONFIG_DEVTMPFS
+  require_builtin_or_module "$config" CONFIG_CGROUPS
+  require_builtin_or_module "$config" CONFIG_TMPFS
   require_builtin_or_module "$config" CONFIG_NET
   require_builtin_or_module "$config" CONFIG_INET
   require_builtin_or_module "$config" CONFIG_NETDEVICES
   require_builtin_or_module "$config" CONFIG_VIRTIO
   require_builtin_or_module "$config" CONFIG_VIRTIO_PCI
   require_builtin_or_module "$config" CONFIG_VIRTIO_NET
+  require_builtin_or_module "$config" CONFIG_SERIAL_8250
+  require_builtin_or_module "$config" CONFIG_SERIAL_8250_CONSOLE
   require_builtin_or_module "$config" "$root_symbol"
 
   if grep -q '^CONFIG_SCSI_VIRTIO=y$' "$config"; then

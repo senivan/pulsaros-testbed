@@ -100,10 +100,10 @@ clone_vm "$VTEP_B" "$VTEP_B_NAME"
 clone_vm "$CLIENT_B" "$CLIENT_B_NAME"
 
 log "Attaching management and dataplane NICs"
-run_pve qm set "$CLIENT_A" --net0 "virtio=$CLIENT_A_MGMT_MAC,bridge=$MGMT_BRIDGE,firewall=0" --net1 "virtio=$CLIENT_A_LEFT_MAC,bridge=$TEST_BRIDGE,tag=$LEFT_VLAN,firewall=0"
-run_pve qm set "$VTEP_A" --net0 "virtio=$VTEP_A_MGMT_MAC,bridge=$MGMT_BRIDGE,firewall=0" --net1 "virtio=$VTEP_A_LEFT_MAC,bridge=$TEST_BRIDGE,tag=$LEFT_VLAN,firewall=0" --net2 "virtio=$VTEP_A_UNDERLAY_MAC,bridge=$TEST_BRIDGE,tag=$UNDERLAY_VLAN,firewall=0"
-run_pve qm set "$VTEP_B" --net0 "virtio=$VTEP_B_MGMT_MAC,bridge=$MGMT_BRIDGE,firewall=0" --net1 "virtio=$VTEP_B_UNDERLAY_MAC,bridge=$TEST_BRIDGE,tag=$UNDERLAY_VLAN,firewall=0" --net2 "virtio=$VTEP_B_RIGHT_MAC,bridge=$TEST_BRIDGE,tag=$RIGHT_VLAN,firewall=0"
-run_pve qm set "$CLIENT_B" --net0 "virtio=$CLIENT_B_MGMT_MAC,bridge=$MGMT_BRIDGE,firewall=0" --net1 "virtio=$CLIENT_B_RIGHT_MAC,bridge=$TEST_BRIDGE,tag=$RIGHT_VLAN,firewall=0"
+run_pve qm set "$CLIENT_A" --serial0 socket --net0 "virtio=$CLIENT_A_MGMT_MAC,bridge=$MGMT_BRIDGE,firewall=0" --net1 "virtio=$CLIENT_A_LEFT_MAC,bridge=$TEST_BRIDGE,tag=$LEFT_VLAN,firewall=0"
+run_pve qm set "$VTEP_A" --serial0 socket --net0 "virtio=$VTEP_A_MGMT_MAC,bridge=$MGMT_BRIDGE,firewall=0" --net1 "virtio=$VTEP_A_LEFT_MAC,bridge=$TEST_BRIDGE,tag=$LEFT_VLAN,firewall=0" --net2 "virtio=$VTEP_A_UNDERLAY_MAC,bridge=$TEST_BRIDGE,tag=$UNDERLAY_VLAN,firewall=0"
+run_pve qm set "$VTEP_B" --serial0 socket --net0 "virtio=$VTEP_B_MGMT_MAC,bridge=$MGMT_BRIDGE,firewall=0" --net1 "virtio=$VTEP_B_UNDERLAY_MAC,bridge=$TEST_BRIDGE,tag=$UNDERLAY_VLAN,firewall=0" --net2 "virtio=$VTEP_B_RIGHT_MAC,bridge=$TEST_BRIDGE,tag=$RIGHT_VLAN,firewall=0"
+run_pve qm set "$CLIENT_B" --serial0 socket --net0 "virtio=$CLIENT_B_MGMT_MAC,bridge=$MGMT_BRIDGE,firewall=0" --net1 "virtio=$CLIENT_B_RIGHT_MAC,bridge=$TEST_BRIDGE,tag=$RIGHT_VLAN,firewall=0"
 
 for vmid in "$CLIENT_A" "$VTEP_A" "$VTEP_B" "$CLIENT_B"; do
   log "Starting VMID $vmid"

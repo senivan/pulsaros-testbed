@@ -5,6 +5,13 @@ export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:${PATH
 log() { printf '[collect] %s\n' "$*"; }
 warn() { printf '[collect] WARN: %s\n' "$*" >&2; }
 die() { printf '[collect] ERROR: %s\n' "$*" >&2; exit 1; }
+run_pve() {
+  if (( EUID == 0 )); then
+    "$@"
+  else
+    sudo -n "$@"
+  fi
+}
 
 RUN_ID="${1:-}"
 [[ "$RUN_ID" =~ ^[0-9]+$ ]] || die "usage: $0 RUN_ID"
@@ -33,6 +40,13 @@ collect_cmd() {
   ssh "${SSH_OPTS[@]}" "$SSH_USER@$ip" "$cmd" > "logs/${host}-${suffix}.log" 2>&1 || warn "failed to collect $suffix from $host"
 }
 
+collect_pve_cmd() {
+  local host="$1" vmid="$2" suffix="$3" cmd="$4"
+  [[ -n "$vmid" ]] || return 0
+  log "Collecting Proxmox $suffix from $host"
+  run_pve bash -c "$cmd" > "logs/${host}-${suffix}.log" 2>&1 || warn "failed to collect Proxmox $suffix from $host"
+}
+
 copy_pcap() {
   local host="$1" ip="$2" remote="$3" local_path="$4"
   [[ -n "$ip" ]] || return 0
@@ -41,12 +55,17 @@ copy_pcap() {
 }
 
 for entry in \
-  "client-a:${CLIENT_A_IP:-}" \
-  "client-b:${CLIENT_B_IP:-}" \
-  "vtep-a:${VTEP_A_IP:-}" \
-  "vtep-b:${VTEP_B_IP:-}"; do
+  "client-a:${CLIENT_A_IP:-}:${CLIENT_A:-}" \
+  "client-b:${CLIENT_B_IP:-}:${CLIENT_B:-}" \
+  "vtep-a:${VTEP_A_IP:-}:${VTEP_A:-}" \
+  "vtep-b:${VTEP_B_IP:-}:${VTEP_B:-}"; do
   host="${entry%%:*}"
-  ip="${entry#*:}"
+  rest="${entry#*:}"
+  ip="${rest%%:*}"
+  vmid="${rest#*:}"
+  collect_pve_cmd "$host" "$vmid" qm-status "qm status '$vmid' --verbose"
+  collect_pve_cmd "$host" "$vmid" qm-config "qm config '$vmid'"
+  collect_pve_cmd "$host" "$vmid" serial-console "timeout 8 qm terminal '$vmid' </dev/null"
   collect_cmd "$host" "$ip" dmesg "sudo dmesg || dmesg"
   collect_cmd "$host" "$ip" journal "sudo journalctl -b --no-pager || journalctl -b --no-pager"
   collect_cmd "$host" "$ip" ip-link "ip link"
