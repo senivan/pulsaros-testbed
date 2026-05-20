@@ -105,6 +105,66 @@
     KERNEL_ROOT_FSTYPE: "{{ kernel_root_fstype.stdout }}"
   when: kernel_source != 'none'
 
+- name: Validate custom kernel boot support before reboot
+  ansible.builtin.shell:
+    cmd: |
+      set -euo pipefail
+      expected="$(cat /tmp/pulsaros-expected-kernel-release)"
+      config="/boot/config-${expected}"
+      initramfs="/boot/initramfs-${expected}.img"
+      root_fstype="${KERNEL_ROOT_FSTYPE}"
+
+      if [ ! -f "$config" ]; then
+        echo "Missing $config; cannot validate custom kernel config" >&2
+        exit 1
+      fi
+      if [ ! -f "$initramfs" ]; then
+        echo "Missing $initramfs; cannot validate custom kernel initramfs" >&2
+        exit 1
+      fi
+
+      require_builtin_or_module() {
+        local symbol="$1"
+        if ! grep -Eq "^${symbol}=(y|m)$" "$config"; then
+          echo "Missing required kernel option ${symbol}=y/m in $config" >&2
+          exit 1
+        fi
+      }
+
+      require_builtin_or_module CONFIG_BLK_DEV_INITRD
+      require_builtin_or_module CONFIG_DEVTMPFS
+      require_builtin_or_module CONFIG_VIRTIO
+      require_builtin_or_module CONFIG_VIRTIO_PCI
+
+      case "$root_fstype" in
+        xfs) require_builtin_or_module CONFIG_XFS_FS ;;
+        btrfs) require_builtin_or_module CONFIG_BTRFS_FS ;;
+        ext4) require_builtin_or_module CONFIG_EXT4_FS ;;
+        *)
+          echo "Unsupported template root filesystem for custom kernel validation: ${root_fstype}" >&2
+          exit 1
+          ;;
+      esac
+
+      if grep -q '^CONFIG_SCSI_VIRTIO=y$' "$config"; then
+        :
+      elif grep -q '^CONFIG_SCSI_VIRTIO=m$' "$config"; then
+        lsinitrd "$initramfs" | grep -q 'virtio_scsi' || {
+          echo "CONFIG_SCSI_VIRTIO=m but virtio_scsi is missing from $initramfs" >&2
+          exit 1
+        }
+      else
+        echo "Missing CONFIG_SCSI_VIRTIO=y/m for Proxmox virtio-scsi boot" >&2
+        exit 1
+      fi
+
+      echo "Custom kernel $expected has boot support for root filesystem $root_fstype"
+  args:
+    executable: /bin/bash
+  environment:
+    KERNEL_ROOT_FSTYPE: "{{ kernel_root_fstype.stdout }}"
+  when: kernel_source != 'none'
+
 - name: Reboot into custom kernel
   ansible.builtin.reboot:
     reboot_timeout: 600
