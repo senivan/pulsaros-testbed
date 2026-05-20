@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:${PATH:-}"
 
 log() { printf '[wait-ssh] %s\n' "$*" >&2; }
 die() { printf '[wait-ssh] ERROR: %s\n' "$*" >&2; exit 1; }

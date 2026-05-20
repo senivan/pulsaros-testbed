@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:${PATH:-}"
 
 log() { printf '[collect] %s\n' "$*"; }
 warn() { printf '[collect] WARN: %s\n' "$*" >&2; }
