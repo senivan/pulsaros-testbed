@@ -152,7 +152,8 @@
       if grep -q '^CONFIG_SCSI_VIRTIO=y$' "$config"; then
         :
       elif grep -q '^CONFIG_SCSI_VIRTIO=m$' "$config"; then
-        lsinitrd "$initramfs" | grep -q 'virtio_scsi' || {
+        initramfs_contents="$(lsinitrd "$initramfs")"
+        grep -q 'virtio_scsi' <<<"$initramfs_contents" || {
           echo "CONFIG_SCSI_VIRTIO=m but virtio_scsi is missing from $initramfs" >&2
           exit 1
         }
@@ -162,7 +163,8 @@
       fi
 
       if grep -Eq '(^| )rd\.lvm\.lv=|(^| )root=/dev/(mapper|dm-)' <<<"${KERNEL_WORKING_ARGS}"; then
-        lsinitrd "$initramfs" | grep -Eq '(^|/)(lvm|lvm_scan|dmsetup)( |$)' || {
+        initramfs_contents="$(lsinitrd "$initramfs")"
+        grep -Eq '(^|/)(lvm|lvm_scan|dmsetup)( |$)' <<<"$initramfs_contents" || {
           echo "Template boot args require LVM, but LVM support is missing from $initramfs" >&2
           exit 1
         }

@@ -44,13 +44,15 @@ require_builtin_or_module() {
 initramfs_contains() {
   local initramfs="$1"
   local pattern="$2"
+  local contents
   if command -v lsinitrd >/dev/null 2>&1; then
-    lsinitrd "$initramfs" | grep -Eq "$pattern"
+    contents="$(lsinitrd "$initramfs")"
   elif command -v bsdtar >/dev/null 2>&1; then
-    bsdtar -tf "$initramfs" | grep -Eq "$pattern"
+    contents="$(bsdtar -tf "$initramfs")"
   else
     die "lsinitrd or bsdtar is required to inspect initramfs contents"
   fi
+  grep -Eq "$pattern" <<<"$contents"
 }
 
 validate_rpm() {
