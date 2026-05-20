@@ -81,9 +81,12 @@
     ip link set "{{ vtep_l2_if.stdout }}" up
     ip link set "{{ vtep_underlay_if.stdout }}" up
     ip link add br-testbed type bridge
+    ip link set br-testbed type bridge stp_state 0 forward_delay 0
     ip link set br-testbed up
+    ip link set "{{ vtep_l2_if.stdout }}" promisc on
     ip link set "{{ vtep_l2_if.stdout }}" master br-testbed
     ip link add vxlan100 type vxlan id 100 local "{{ underlay_ip.split('/')[0] }}" remote "{{ vxlan_remote }}" dstport 4789 dev "{{ vtep_underlay_if.stdout }}"
+    ip link set vxlan100 promisc on
     ip link set vxlan100 master br-testbed
     ip link set vxlan100 up
     bridge fdb replace "{{ remote_client_mac | lower }}" dev vxlan100 dst "{{ vxlan_remote }}" self
