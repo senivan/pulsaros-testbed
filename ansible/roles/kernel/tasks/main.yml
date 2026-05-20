@@ -134,6 +134,7 @@
       require_builtin_or_module CONFIG_DEVTMPFS
       require_builtin_or_module CONFIG_VIRTIO
       require_builtin_or_module CONFIG_VIRTIO_PCI
+      require_builtin_or_module CONFIG_VIRTIO_NET
 
       case "$root_fstype" in
         xfs) require_builtin_or_module CONFIG_XFS_FS ;;
