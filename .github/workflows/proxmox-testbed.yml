@@ -39,7 +39,7 @@ concurrency:
 
 jobs:
   testbed:
-    runs-on: [self-hosted, linux, proxmox, pulsaros-testbed]
+    runs-on: self-hosted
     timeout-minutes: 90
 
     env:
