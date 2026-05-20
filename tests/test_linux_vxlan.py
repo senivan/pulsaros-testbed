@@ -29,10 +29,10 @@ def test_tcpdump_captures_udp_4789(topology, ssh_user, ssh_key):
             ssh_user,
             ssh_key,
             host,
-            "sudo -n mkdir -p /tmp/pulsaros-testbed && "
-            f"sudo -n rm -f {remote_pcap} && "
-            f"nohup sudo -n timeout 20 tcpdump -U -i {underlay_if} -w {remote_pcap} udp port 4789 "
-            "</dev/null >/tmp/pulsaros-testbed/tcpdump.log 2>&1 &",
+            "sudo -n sh -c "
+            f"'mkdir -p /tmp/pulsaros-testbed && rm -f {remote_pcap} && "
+            f"nohup timeout 20 tcpdump -U -i {underlay_if} -w {remote_pcap} udp port 4789 "
+            ">/tmp/pulsaros-testbed/tcpdump.log 2>&1 </dev/null &'",
             timeout=10,
         )
 
