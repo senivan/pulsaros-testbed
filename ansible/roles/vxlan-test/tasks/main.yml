@@ -18,8 +18,12 @@
 - name: Configure client dataplane interface
   ansible.builtin.shell: |
     set -euo pipefail
+    if command -v nmcli >/dev/null 2>&1; then
+      nmcli device set "{{ client_dataplane_if.stdout }}" managed no || true
+    fi
+    ip link set "{{ client_dataplane_if.stdout }}" nomaster 2>/dev/null || true
     ip addr flush dev "{{ client_dataplane_if.stdout }}"
-    ip addr add "{{ dataplane_ip }}" dev "{{ client_dataplane_if.stdout }}"
+    ip addr replace "{{ dataplane_ip }}" dev "{{ client_dataplane_if.stdout }}"
     ip link set "{{ client_dataplane_if.stdout }}" up
   args:
     executable: /bin/bash
@@ -62,11 +66,17 @@
 - name: Configure VTEP Linux VXLAN reference bridge
   ansible.builtin.shell: |
     set -euo pipefail
+    if command -v nmcli >/dev/null 2>&1; then
+      nmcli device set "{{ vtep_l2_if.stdout }}" managed no || true
+      nmcli device set "{{ vtep_underlay_if.stdout }}" managed no || true
+    fi
     ip link del vxlan100 2>/dev/null || true
     ip link del br-testbed 2>/dev/null || true
+    ip link set "{{ vtep_l2_if.stdout }}" nomaster 2>/dev/null || true
+    ip link set "{{ vtep_underlay_if.stdout }}" nomaster 2>/dev/null || true
     ip addr flush dev "{{ vtep_l2_if.stdout }}"
     ip addr flush dev "{{ vtep_underlay_if.stdout }}"
-    ip addr add "{{ underlay_ip }}" dev "{{ vtep_underlay_if.stdout }}"
+    ip addr replace "{{ underlay_ip }}" dev "{{ vtep_underlay_if.stdout }}"
     ip link set "{{ vtep_l2_if.stdout }}" up
     ip link set "{{ vtep_underlay_if.stdout }}" up
     ip link add br-testbed type bridge
@@ -75,6 +85,7 @@
     ip link add vxlan100 type vxlan id 100 local "{{ underlay_ip.split('/')[0] }}" remote "{{ vxlan_remote }}" dstport 4789 dev "{{ vtep_underlay_if.stdout }}"
     ip link set vxlan100 master br-testbed
     ip link set vxlan100 up
+    bridge fdb replace 00:00:00:00:00:00 dev vxlan100 dst "{{ vxlan_remote }}" self
   args:
     executable: /bin/bash
   changed_when: true
