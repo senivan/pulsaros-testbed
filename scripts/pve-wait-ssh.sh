@@ -4,6 +4,13 @@ export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:${PATH
 
 log() { printf '[wait-ssh] %s\n' "$*" >&2; }
 die() { printf '[wait-ssh] ERROR: %s\n' "$*" >&2; exit 1; }
+run_pve() {
+  if (( EUID == 0 )); then
+    "$@"
+  else
+    sudo -n "$@"
+  fi
+}
 
 REQUESTED_RUN_ID="${1:-}"
 [[ "$REQUESTED_RUN_ID" =~ ^[0-9]+$ ]] || die "usage: $0 RUN_ID"
@@ -19,7 +26,7 @@ SLEEP_SECONDS=5
 
 guest_ip() {
   local vmid="$1" json ip
-  json=$(qm guest cmd "$vmid" network-get-interfaces 2>/dev/null || true)
+  json=$(run_pve qm guest cmd "$vmid" network-get-interfaces 2>/dev/null || true)
   [[ -n "$json" ]] || return 1
   ip=$(jq -r '
     .[]

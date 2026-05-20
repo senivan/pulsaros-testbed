@@ -5,6 +5,13 @@ export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:${PATH
 log() { printf '[create] %s\n' "$*"; }
 die() { printf '[create] ERROR: %s\n' "$*" >&2; exit 1; }
 need_env() { [[ -n "${!1:-}" ]] || die "Required environment variable $1 is not set"; }
+run_pve() {
+  if (( EUID == 0 )); then
+    "$@"
+  else
+    sudo -n "$@"
+  fi
+}
 
 RUN_ID="${1:-}"
 [[ "$RUN_ID" =~ ^[0-9]+$ ]] || die "usage: $0 RUN_ID"
@@ -53,11 +60,11 @@ CLIENT_B_NAME="pulsar-${RUN_ID}-client-b"
 
 clone_vm() {
   local vmid="$1" name="$2"
-  if qm status "$vmid" >/dev/null 2>&1; then
+  if run_pve qm status "$vmid" >/dev/null 2>&1; then
     die "target VMID $vmid already exists"
   fi
   log "Cloning $name as VMID $vmid"
-  qm clone "$TEMPLATE_ID" "$vmid" --name "$name" --full 1 --storage "$STORAGE"
+  run_pve qm clone "$TEMPLATE_ID" "$vmid" --name "$name" --full 1 --storage "$STORAGE"
 }
 
 log "Writing topology to artifacts/topology.env"
@@ -93,14 +100,14 @@ clone_vm "$VTEP_B" "$VTEP_B_NAME"
 clone_vm "$CLIENT_B" "$CLIENT_B_NAME"
 
 log "Attaching management and dataplane NICs"
-qm set "$CLIENT_A" --net0 "virtio=$CLIENT_A_MGMT_MAC,bridge=$MGMT_BRIDGE" --net1 "virtio=$CLIENT_A_LEFT_MAC,bridge=$TEST_BRIDGE,tag=$LEFT_VLAN"
-qm set "$VTEP_A" --net0 "virtio=$VTEP_A_MGMT_MAC,bridge=$MGMT_BRIDGE" --net1 "virtio=$VTEP_A_LEFT_MAC,bridge=$TEST_BRIDGE,tag=$LEFT_VLAN" --net2 "virtio=$VTEP_A_UNDERLAY_MAC,bridge=$TEST_BRIDGE,tag=$UNDERLAY_VLAN"
-qm set "$VTEP_B" --net0 "virtio=$VTEP_B_MGMT_MAC,bridge=$MGMT_BRIDGE" --net1 "virtio=$VTEP_B_UNDERLAY_MAC,bridge=$TEST_BRIDGE,tag=$UNDERLAY_VLAN" --net2 "virtio=$VTEP_B_RIGHT_MAC,bridge=$TEST_BRIDGE,tag=$RIGHT_VLAN"
-qm set "$CLIENT_B" --net0 "virtio=$CLIENT_B_MGMT_MAC,bridge=$MGMT_BRIDGE" --net1 "virtio=$CLIENT_B_RIGHT_MAC,bridge=$TEST_BRIDGE,tag=$RIGHT_VLAN"
+run_pve qm set "$CLIENT_A" --net0 "virtio=$CLIENT_A_MGMT_MAC,bridge=$MGMT_BRIDGE" --net1 "virtio=$CLIENT_A_LEFT_MAC,bridge=$TEST_BRIDGE,tag=$LEFT_VLAN"
+run_pve qm set "$VTEP_A" --net0 "virtio=$VTEP_A_MGMT_MAC,bridge=$MGMT_BRIDGE" --net1 "virtio=$VTEP_A_LEFT_MAC,bridge=$TEST_BRIDGE,tag=$LEFT_VLAN" --net2 "virtio=$VTEP_A_UNDERLAY_MAC,bridge=$TEST_BRIDGE,tag=$UNDERLAY_VLAN"
+run_pve qm set "$VTEP_B" --net0 "virtio=$VTEP_B_MGMT_MAC,bridge=$MGMT_BRIDGE" --net1 "virtio=$VTEP_B_UNDERLAY_MAC,bridge=$TEST_BRIDGE,tag=$UNDERLAY_VLAN" --net2 "virtio=$VTEP_B_RIGHT_MAC,bridge=$TEST_BRIDGE,tag=$RIGHT_VLAN"
+run_pve qm set "$CLIENT_B" --net0 "virtio=$CLIENT_B_MGMT_MAC,bridge=$MGMT_BRIDGE" --net1 "virtio=$CLIENT_B_RIGHT_MAC,bridge=$TEST_BRIDGE,tag=$RIGHT_VLAN"
 
 for vmid in "$CLIENT_A" "$VTEP_A" "$VTEP_B" "$CLIENT_B"; do
   log "Starting VMID $vmid"
-  qm start "$vmid"
+  run_pve qm start "$vmid"
 done
 
 log "Created run $RUN_ID"
