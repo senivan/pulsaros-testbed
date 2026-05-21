@@ -49,6 +49,15 @@ require_builtin() {
   fi
 }
 
+require_config_string() {
+  local config="$1"
+  local symbol="$2"
+  local expected="$3"
+  if ! grep -q "^${symbol}=\"${expected}\"$" "$config"; then
+    die "Missing required kernel option ${symbol}=\"${expected}\" in $config"
+  fi
+}
+
 initramfs_contains() {
   local initramfs="$1"
   local pattern="$2"
@@ -90,6 +99,7 @@ validate_rpm() {
 
   [[ -f "$initramfs" ]] || die "Missing /boot/initramfs-${release}.img in $(basename "$rpm")"
 
+  require_config_string "$config" CONFIG_LOCALVERSION "-pulsaros"
   require_builtin_or_module "$config" CONFIG_BLK_DEV_INITRD
   require_builtin_or_module "$config" CONFIG_DEVTMPFS
   require_builtin "$config" CONFIG_MD

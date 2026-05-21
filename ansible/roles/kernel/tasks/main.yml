@@ -182,6 +182,16 @@
         fi
       }
 
+      require_config_string() {
+        local symbol="$1"
+        local expected="$2"
+        if ! grep -q "^${symbol}=\"${expected}\"$" "$config"; then
+          echo "Missing required kernel option ${symbol}=\"${expected}\" in $config" >&2
+          exit 1
+        fi
+      }
+
+      require_config_string CONFIG_LOCALVERSION "-pulsaros"
       require_builtin_or_module CONFIG_BLK_DEV_INITRD
       require_builtin_or_module CONFIG_DEVTMPFS
       require_builtin CONFIG_MD
