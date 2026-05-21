@@ -52,10 +52,21 @@ collect_pve_serial() {
   local host="$1" vmid="$2"
   [[ -n "$vmid" ]] || return 0
   log "Collecting Proxmox serial console from $host"
+  local serial_socket="/var/run/qemu-server/${vmid}.serial0"
   if (( EUID == 0 )); then
-    timeout 8 qm terminal "$vmid" > "logs/${host}-serial-console.log" 2>&1 || warn "failed to collect Proxmox serial console from $host"
+    if [[ -S "$serial_socket" ]]; then
+      timeout 8 socat - "UNIX-CONNECT:${serial_socket}" > "logs/${host}-serial-console.log" 2>&1 || warn "failed to collect Proxmox serial console from $host"
+    else
+      timeout 8 qm terminal "$vmid" > "logs/${host}-serial-console.log" 2>&1 || warn "failed to collect Proxmox serial console from $host"
+    fi
+  elif command -v script >/dev/null 2>&1; then
+    timeout 8 script -q -c "sudo -n qm terminal $vmid" /dev/null > "logs/${host}-serial-console.log" 2>&1 || warn "failed to collect Proxmox serial console from $host"
   else
-    timeout 8 sudo -n qm terminal "$vmid" > "logs/${host}-serial-console.log" 2>&1 || warn "failed to collect Proxmox serial console from $host"
+    if sudo -n test -S "$serial_socket"; then
+      timeout 8 sudo -n socat - "UNIX-CONNECT:${serial_socket}" > "logs/${host}-serial-console.log" 2>&1 || warn "failed to collect Proxmox serial console from $host"
+    else
+      timeout 8 sudo -n qm terminal "$vmid" > "logs/${host}-serial-console.log" 2>&1 || warn "failed to collect Proxmox serial console from $host"
+    fi
   fi
 }
 
@@ -64,6 +75,13 @@ copy_pcap() {
   [[ -n "$ip" ]] || return 0
   log "Collecting pcap from $host"
   scp "${SSH_OPTS[@]}" "$SSH_USER@$ip:$remote" "$local_path" >/dev/null 2>&1 || warn "pcap not available on $host"
+}
+
+collect_guest_agent_cmd() {
+  local host="$1" vmid="$2" suffix="$3" cmd="$4"
+  [[ -n "$vmid" ]] || return 0
+  log "Collecting guest-agent $suffix from $host"
+  run_pve qm guest exec "$vmid" --capture-output -- /bin/sh -lc "$cmd" > "logs/${host}-guest-agent-${suffix}.log" 2>&1 || warn "failed to collect guest-agent $suffix from $host"
 }
 
 for entry in \
@@ -78,6 +96,10 @@ for entry in \
   collect_pve_cmd "$host" "$vmid" qm-status qm status "$vmid" --verbose
   collect_pve_cmd "$host" "$vmid" qm-config qm config "$vmid"
   collect_pve_serial "$host" "$vmid"
+  collect_guest_agent_cmd "$host" "$vmid" ping "true"
+  collect_guest_agent_cmd "$host" "$vmid" ip-addr "ip addr || true"
+  collect_guest_agent_cmd "$host" "$vmid" uname "uname -a || true"
+  collect_guest_agent_cmd "$host" "$vmid" journal "journalctl -b --no-pager | tail -n 300 || true"
   collect_cmd "$host" "$ip" dmesg "sudo dmesg || dmesg"
   collect_cmd "$host" "$ip" journal "sudo journalctl -b --no-pager || journalctl -b --no-pager"
   collect_cmd "$host" "$ip" ip-link "ip link"

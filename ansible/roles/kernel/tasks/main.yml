@@ -88,7 +88,7 @@
       kernel="/boot/vmlinuz-${latest}"
       working_args="${KERNEL_WORKING_ARGS}"
       root_fstype="${KERNEL_ROOT_FSTYPE}"
-      extra_args="hugepagesz=2M default_hugepagesz=2M rootwait console=tty0 console=ttyS0,115200n8"
+      extra_args="hugepagesz=2M default_hugepagesz=2M rootwait console=tty0 console=ttyS0,115200n8 earlyprintk=serial,ttyS0,115200 ignore_loglevel loglevel=7"
       # The kernel RPM may add rootfstype=ext4 unconditionally. Reuse the
       # template kernel's known-good root args so Fedora btrfs/xfs templates boot.
       grubby --update-kernel "$kernel" \
@@ -133,7 +133,10 @@
       require_builtin_or_module CONFIG_BLK_DEV_INITRD
       require_builtin_or_module CONFIG_DEVTMPFS
       require_builtin_or_module CONFIG_CGROUPS
+      require_builtin_or_module CONFIG_CGROUP_SCHED
+      require_builtin_or_module CONFIG_MEMCG
       require_builtin_or_module CONFIG_TMPFS
+      require_builtin_or_module CONFIG_DEVPTS_FS
       require_builtin_or_module CONFIG_NET
       require_builtin_or_module CONFIG_INET
       require_builtin_or_module CONFIG_NETDEVICES
@@ -182,11 +185,22 @@
     KERNEL_WORKING_ARGS: "{{ kernel_working_args.stdout }}"
   when: kernel_source != 'none'
 
-- name: Reboot into custom kernel
-  ansible.builtin.reboot:
-    reboot_timeout: 600
-    connect_timeout: 10
-    test_command: uname -r
+- name: Trigger reboot into custom kernel
+  ansible.builtin.shell: |
+    set -euo pipefail
+    sleep 2
+    systemctl reboot
+  args:
+    executable: /bin/bash
+  async: 1
+  poll: 0
+  changed_when: true
+  when: kernel_source != 'none'
+
+- name: Wait for custom kernel SSH
+  ansible.builtin.wait_for_connection:
+    delay: 10
+    timeout: 240
   when: kernel_source != 'none'
 
 - name: Capture booted kernel release
