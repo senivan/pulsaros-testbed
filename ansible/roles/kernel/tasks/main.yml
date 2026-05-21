@@ -100,9 +100,43 @@
       grubby --set-default "$kernel"
       grubby --info "$kernel" > /tmp/pulsaros-custom-kernel-grubby-info
       cat /tmp/pulsaros-custom-kernel-grubby-info
+      bls_id="$(awk -F= '/^id=/{gsub(/"/, "", $2); print $2; exit}' /tmp/pulsaros-custom-kernel-grubby-info)"
+      bls_entry="/boot/loader/entries/${bls_id}.conf"
+      if [ ! -f "$bls_entry" ]; then
+        echo "Custom kernel BLS entry not found: $bls_entry" >&2
+        exit 1
+      fi
+      # Fedora grubby may split root= into a synthetic root="..." field in
+      # grubby --info. Patch the BLS options line directly so the booted kernel
+      # receives the same known-good root args as the template kernel.
+      bls_options="$working_args $extra_args"
+      tmp="$(mktemp)"
+      awk -v options="$bls_options" '
+        BEGIN { wrote = 0 }
+        /^options[[:space:]]/ {
+          print "options " options
+          wrote = 1
+          next
+        }
+        { print }
+        END {
+          if (!wrote) {
+            print "options " options
+          }
+        }
+      ' "$bls_entry" > "$tmp"
+      cat "$tmp" > "$bls_entry"
+      rm -f "$tmp"
+      echo "Patched BLS entry $bls_entry"
+      cat "$bls_entry"
       if ! grep -Eq '^(args=.*(^|[[:space:]"])root=|root="/)' /tmp/pulsaros-custom-kernel-grubby-info; then
         echo "Custom kernel grubby entry is missing root= after update:" >&2
         cat /tmp/pulsaros-custom-kernel-grubby-info >&2
+        exit 1
+      fi
+      if ! grep -Eq '^options .* root=|^options root=' "$bls_entry"; then
+        echo "Custom kernel BLS options are missing root= after patch:" >&2
+        cat "$bls_entry" >&2
         exit 1
       fi
       echo "Selected $latest with root filesystem ${root_fstype}"
