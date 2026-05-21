@@ -4,6 +4,12 @@
 
 Check that the workflow is running on the Proxmox-capable self-hosted runner and that `qm list` works for the runner user.
 
+Topology rendering requires `python3-yaml` on the runner. On Fedora:
+
+```bash
+sudo dnf install -y python3-pyyaml
+```
+
 ## Template Is Not Found
 
 Confirm `TEMPLATE_ID` or the workflow `template_vmid` input. The VM must exist and be marked as a template.
