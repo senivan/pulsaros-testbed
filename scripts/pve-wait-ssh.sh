@@ -14,7 +14,7 @@ run_pve() {
 
 REQUESTED_RUN_ID="${1:-}"
 [[ "$REQUESTED_RUN_ID" =~ ^[0-9]+$ ]] || die "usage: $0 RUN_ID"
-[[ -f artifacts/topology.env ]] || die "artifacts/topology.env not found"
+[[ -f artifacts/topology.json ]] || die "artifacts/topology.json not found"
 # shellcheck disable=SC1091
 source artifacts/topology.env
 [[ "${RUN_ID:-}" == "$REQUESTED_RUN_ID" ]] || die "topology RUN_ID does not match requested RUN_ID"
@@ -70,23 +70,12 @@ wait_for_ssh() {
   die "timed out waiting for SSH on $label ($ip)"
 }
 
-CLIENT_A_IP=$(wait_for_ip client-a "$CLIENT_A")
-VTEP_A_IP=$(wait_for_ip vtep-a "$VTEP_A")
-VTEP_B_IP=$(wait_for_ip vtep-b "$VTEP_B")
-CLIENT_B_IP=$(wait_for_ip client-b "$CLIENT_B")
+host_ip_args=()
+while IFS=$'\t' read -r host vmid; do
+  ip=$(wait_for_ip "$host" "$vmid")
+  wait_for_ssh "$host" "$ip"
+  host_ip_args+=("${host}=${ip}")
+done < <(jq -r '.hosts[] | [.name, .vmid] | @tsv' artifacts/topology.json)
 
-wait_for_ssh client-a "$CLIENT_A_IP"
-wait_for_ssh vtep-a "$VTEP_A_IP"
-wait_for_ssh vtep-b "$VTEP_B_IP"
-wait_for_ssh client-b "$CLIENT_B_IP"
-
-tmp=$(mktemp)
-grep -Ev '^(CLIENT_A_IP|VTEP_A_IP|VTEP_B_IP|CLIENT_B_IP)=' artifacts/topology.env > "$tmp"
-cat >> "$tmp" <<EOF
-CLIENT_A_IP=$CLIENT_A_IP
-VTEP_A_IP=$VTEP_A_IP
-VTEP_B_IP=$VTEP_B_IP
-CLIENT_B_IP=$CLIENT_B_IP
-EOF
-mv "$tmp" artifacts/topology.env
-log "Updated artifacts/topology.env with management IPs"
+./scripts/render-topology.py update-ips "${host_ip_args[@]}"
+log "Updated artifacts/topology.json and artifacts/topology.env with management IPs"

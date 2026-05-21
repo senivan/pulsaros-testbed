@@ -13,6 +13,10 @@ on:
           - dpdk-smoke
           - linux-vxlan-reference
           - full
+      topology:
+        description: "Topology YAML name from topologies/"
+        required: true
+        default: "linux-vxlan-reference"
       template_vmid:
         description: "Proxmox template VMID"
         required: true
@@ -195,6 +199,7 @@ jobs:
     env:
       RUN_ID: ${{ github.run_id }}
       SCENARIO: ${{ inputs.scenario }}
+      TOPOLOGY: ${{ inputs.topology }}
       TEMPLATE_ID: ${{ inputs.template_vmid }}
       STORAGE: ${{ inputs.storage }}
       MGMT_BRIDGE: ${{ inputs.mgmt_bridge }}
@@ -243,7 +248,7 @@ jobs:
         run: ./scripts/pve-generate-inventory.sh "$RUN_ID"
 
       - name: Provision VMs
-        run: ansible-playbook -i ansible/inventory.generated.ini ansible/site.yml
+        run: ansible-playbook -i ansible/inventory.generated.ini ansible/site.generated.yml
 
       - name: Run scenario
         run: ./scripts/pve-run-scenario.sh "$SCENARIO"
