@@ -174,8 +174,18 @@
         fi
       }
 
+      require_builtin() {
+        local symbol="$1"
+        if ! grep -q "^${symbol}=y$" "$config"; then
+          echo "Missing required built-in kernel option ${symbol}=y in $config" >&2
+          exit 1
+        fi
+      }
+
       require_builtin_or_module CONFIG_BLK_DEV_INITRD
       require_builtin_or_module CONFIG_DEVTMPFS
+      require_builtin CONFIG_MD
+      require_builtin CONFIG_BLK_DEV_DM
       require_builtin_or_module CONFIG_CGROUPS
       require_builtin_or_module CONFIG_CGROUP_SCHED
       require_builtin_or_module CONFIG_MEMCG

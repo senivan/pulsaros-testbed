@@ -41,6 +41,14 @@ require_builtin_or_module() {
   fi
 }
 
+require_builtin() {
+  local config="$1"
+  local symbol="$2"
+  if ! grep -q "^${symbol}=y$" "$config"; then
+    die "Missing required built-in kernel option ${symbol}=y in $config"
+  fi
+}
+
 initramfs_contains() {
   local initramfs="$1"
   local pattern="$2"
@@ -84,6 +92,8 @@ validate_rpm() {
 
   require_builtin_or_module "$config" CONFIG_BLK_DEV_INITRD
   require_builtin_or_module "$config" CONFIG_DEVTMPFS
+  require_builtin "$config" CONFIG_MD
+  require_builtin "$config" CONFIG_BLK_DEV_DM
   require_builtin_or_module "$config" CONFIG_CGROUPS
   require_builtin_or_module "$config" CONFIG_CGROUP_SCHED
   require_builtin_or_module "$config" CONFIG_MEMCG
