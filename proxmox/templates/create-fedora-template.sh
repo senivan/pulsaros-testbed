@@ -3,7 +3,7 @@ set -euo pipefail
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:${PATH:-}"
 
 cat >&2 <<'EOF'
-This repository does not automate Fedora template creation in v1.
+This repository does not fully automate Fedora template creation yet.
 
 Create a Proxmox template VM manually with:
 - qemu-guest-agent installed and enabled

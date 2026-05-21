@@ -57,7 +57,7 @@ The template VM must have:
 - Package manager access for Ansible roles.
 - Virtio NIC support.
 
-v1 requires qemu guest agent for management IP discovery.
+The testbed requires qemu guest agent for management IP discovery.
 
 ## Runner Labels
 

@@ -12,6 +12,9 @@ Scripts do not create Linux bridges dynamically. In the default `qinq` mode,
 they do create and delete per-run Proxmox SDN QinQ zones and VNets on top of
 the existing parent bridge.
 
+Topology files define the logical dataplane networks. The renderer maps those
+logical networks to either generated QinQ VNets or legacy bridge VLAN tags.
+
 ## Default QinQ Mode
 
 `NETWORK_MODE=qinq` is the default. Each run creates one QinQ zone and one VNet
@@ -39,8 +42,10 @@ right-l2:  103
 ```
 
 VM NICs attach directly to the generated VNets. Topology networks can be marked
-as `access` or `trunk`; v1 preserves that metadata and uses it to make future
-guest-visible VLAN tests explicit.
+as `access` or `trunk`; the current renderer preserves that metadata and uses
+the same generated VNet attachment path for both. Future scenarios can use the
+metadata to decide whether guest traffic should be untagged or tagged inside the
+VM.
 
 The cleanup path deletes the generated VNets and zone after the VMs are
 destroyed. Generated SDN names are intentionally short because Proxmox bridge
@@ -60,9 +65,9 @@ RIGHT_VLAN=$((VLAN_BASE + 3))
 
 VM NICs attach to `TEST_BRIDGE` with Proxmox `tag=<vlan>`.
 
-## NIC Layout
+## Default NIC Layout
 
-NIC layout:
+The default `linux-vxlan-reference` topology declares this NIC layout:
 
 ```text
 client-a:
@@ -94,3 +99,13 @@ vtep-b underlay:    172.16.100.2/30
 VNI:                100
 UDP port:           4789
 ```
+
+## Adding Networks
+
+Add new logical networks in a topology YAML file under `networks`. Each network
+needs a short `vnet_prefix`, an `inner_vlan`, and `mode: access` or
+`mode: trunk`.
+
+Generated Proxmox bridge device names must stay short, so VNet prefixes should
+normally be one or two lowercase characters. For a run suffix of `123456`, a
+prefix `pa` becomes VNet `pa123456`.

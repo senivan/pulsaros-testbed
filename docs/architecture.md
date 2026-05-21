@@ -1,7 +1,8 @@
 # Architecture
 
 Each test run renders a topology YAML file, then creates full-clone VMs from a
-Proxmox template. The default topology is:
+Proxmox template. The default topology in `topologies/linux-vxlan-reference.yml`
+creates:
 
 ```text
 pulsar-${RUN_ID}-client-a
@@ -10,7 +11,8 @@ pulsar-${RUN_ID}-vtep-b
 pulsar-${RUN_ID}-client-b
 ```
 
-The renderer computes deterministic VM IDs:
+The renderer computes deterministic VM IDs from each host's topology-declared
+`vmid_offset`:
 
 ```bash
 BASE=$(( 200000 + RUN_ID % 50000 ))
@@ -35,10 +37,13 @@ ansible/site.generated.yml
 ```
 
 Add new topologies as YAML files under `topologies/`. A topology declares
-networks, hosts, NICs, Ansible host variables, and the generated playbook roles.
-Scripts consume the resolved JSON instead of hard-coding host names where the
-workflow is topology-generic.
+networks, hosts, NICs, Ansible host variables, generated playbook roles, and
+compatibility aliases for tests that still consume legacy env keys. Scripts
+consume the resolved JSON instead of hard-coding host names where the workflow
+is topology-generic.
 
-The GitHub runner does not host the test workload. It only calls Proxmox `qm`, runs Ansible over SSH, invokes pytest, and uploads artifacts.
+The GitHub runner does not host the test workload. It only calls Proxmox tools,
+runs Ansible over SSH, invokes pytest, and uploads artifacts.
 
-v1 intentionally uses the `qm` CLI only. Proxmox API support is out of scope.
+VM lifecycle uses the Proxmox `qm` CLI. The default QinQ dataplane mode also
+uses `pvesh` to create, apply, and delete generated Proxmox SDN zones and VNets.
