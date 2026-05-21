@@ -13,7 +13,7 @@ inventory:
 	./scripts/pve-generate-inventory.sh "$${RUN_ID}"
 
 provision:
-	ansible-playbook -i ansible/inventory.generated.ini ansible/site.yml
+	ansible-playbook -i ansible/inventory.generated.ini ansible/site.generated.yml
 
 scenario:
 	./scripts/pve-run-scenario.sh "$${SCENARIO:-kernel-smoke}"
