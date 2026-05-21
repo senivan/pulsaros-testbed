@@ -119,9 +119,9 @@ collect_guest_agent_cmd() {
 }
 
 if [[ -f artifacts/topology.json ]]; then
-  host_entries=$(jq -r '.hosts[] | @base64' artifacts/topology.json)
+  mapfile -t host_entries < <(jq -r '.hosts[] | @base64' artifacts/topology.json)
 else
-  host_entries=$(jq -n -r \
+  mapfile -t host_entries < <(jq -n -r \
     --arg ca_ip "${CLIENT_A_IP:-}" --arg ca "${CLIENT_A:-}" \
     --arg cb_ip "${CLIENT_B_IP:-}" --arg cb "${CLIENT_B:-}" \
     --arg va_ip "${VTEP_A_IP:-}" --arg va "${VTEP_A:-}" \
@@ -134,7 +134,8 @@ else
     ][] | @base64')
 fi
 
-while IFS= read -r entry; do
+log "Collecting from ${#host_entries[@]} topology hosts"
+for entry in "${host_entries[@]}"; do
   [[ -n "$entry" ]] || continue
   host=$(printf '%s' "$entry" | base64 -d | jq -r '.name')
   ip=$(printf '%s' "$entry" | base64 -d | jq -r '.management_ip // ""')
@@ -154,7 +155,7 @@ while IFS= read -r entry; do
   collect_cmd "$host" "$ip" uname "uname -a"
   collect_cmd "$host" "$ip" kernel-rpms "rpm -qa 'kernel*' | sort || true"
   collect_cmd "$host" "$ip" kernel-boot "sudo grubby --info=DEFAULT || true; findmnt / || true; cat /proc/cmdline || true"
-done <<<"$host_entries"
+done
 
 if [[ -n "${VTEP_A_IP:-}" ]]; then
   copy_pcap vtep-a "${VTEP_A_IP:-}" /tmp/pulsaros-testbed/vtep-a-underlay.pcap pcaps/vtep-a-underlay.pcap
