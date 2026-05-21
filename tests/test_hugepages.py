@@ -1,8 +1,8 @@
-from conftest import ssh
+from conftest import group_hosts, ssh
 
 
 def test_vteps_have_hugepages(topology, ssh_user, ssh_key):
-    for host in ("vtep-a", "vtep-b"):
+    for host in group_hosts(topology, "vteps"):
         result = ssh(
             topology,
             ssh_user,
@@ -14,5 +14,5 @@ def test_vteps_have_hugepages(topology, ssh_user, ssh_key):
 
 
 def test_vteps_have_huge_mountpoint(topology, ssh_user, ssh_key):
-    for host in ("vtep-a", "vtep-b"):
+    for host in group_hosts(topology, "vteps"):
         ssh(topology, ssh_user, ssh_key, host, "test -d /mnt/huge")

@@ -1,11 +1,11 @@
 import pytest
 
-from conftest import ssh
+from conftest import group_hosts, ssh
 
 
 def test_dpdk_testpmd_available_or_report_unavailable(topology, ssh_user, ssh_key):
     unavailable = []
-    for host in ("vtep-a", "vtep-b"):
+    for host in group_hosts(topology, "vteps"):
         result = ssh(
             topology,
             ssh_user,

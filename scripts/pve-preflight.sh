@@ -30,9 +30,10 @@ else
 fi
 
 log "Checking required commands"
-for cmd in sudo qm pvesh pveversion pvesm ansible-playbook pytest ssh scp jq df; do
+for cmd in sudo qm pvesh pveversion pvesm ansible-playbook pytest ssh scp jq df python3; do
   need_cmd "$cmd"
 done
+python3 -c 'import yaml' >/dev/null 2>&1 || die "python3-yaml is required for topology rendering"
 
 log "Checking this looks like a Proxmox host"
 [[ -d /etc/pve ]] || die "/etc/pve not found"

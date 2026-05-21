@@ -118,15 +118,18 @@ collect_guest_agent_cmd() {
   warn "guest-agent $suffix collection from $host did not finish before timeout"
 }
 
-for entry in \
-  "client-a:${CLIENT_A_IP:-}:${CLIENT_A:-}" \
-  "client-b:${CLIENT_B_IP:-}:${CLIENT_B:-}" \
-  "vtep-a:${VTEP_A_IP:-}:${VTEP_A:-}" \
-  "vtep-b:${VTEP_B_IP:-}:${VTEP_B:-}"; do
-  host="${entry%%:*}"
-  rest="${entry#*:}"
-  ip="${rest%%:*}"
-  vmid="${rest#*:}"
+if [[ -f artifacts/topology.json ]]; then
+  host_entries=$(jq -r '.hosts[] | [.name, .management_ip, .vmid] | @tsv' artifacts/topology.json)
+else
+  host_entries=$(printf '%s\n' \
+    "client-a	${CLIENT_A_IP:-}	${CLIENT_A:-}" \
+    "client-b	${CLIENT_B_IP:-}	${CLIENT_B:-}" \
+    "vtep-a	${VTEP_A_IP:-}	${VTEP_A:-}" \
+    "vtep-b	${VTEP_B_IP:-}	${VTEP_B:-}")
+fi
+
+while IFS=$'\t' read -r host ip vmid; do
+  [[ -n "$host" ]] || continue
   collect_pve_cmd "$host" "$vmid" qm-status qm status "$vmid" --verbose
   collect_pve_cmd "$host" "$vmid" qm-config qm config "$vmid"
   collect_pve_serial "$host" "$vmid"
@@ -141,9 +144,13 @@ for entry in \
   collect_cmd "$host" "$ip" uname "uname -a"
   collect_cmd "$host" "$ip" kernel-rpms "rpm -qa 'kernel*' | sort || true"
   collect_cmd "$host" "$ip" kernel-boot "sudo grubby --info=DEFAULT || true; findmnt / || true; cat /proc/cmdline || true"
-done
+done <<<"$host_entries"
 
-copy_pcap vtep-a "${VTEP_A_IP:-}" /tmp/pulsaros-testbed/vtep-a-underlay.pcap pcaps/vtep-a-underlay.pcap
-copy_pcap vtep-b "${VTEP_B_IP:-}" /tmp/pulsaros-testbed/vtep-b-underlay.pcap pcaps/vtep-b-underlay.pcap
+if [[ -n "${VTEP_A_IP:-}" ]]; then
+  copy_pcap vtep-a "${VTEP_A_IP:-}" /tmp/pulsaros-testbed/vtep-a-underlay.pcap pcaps/vtep-a-underlay.pcap
+fi
+if [[ -n "${VTEP_B_IP:-}" ]]; then
+  copy_pcap vtep-b "${VTEP_B_IP:-}" /tmp/pulsaros-testbed/vtep-b-underlay.pcap pcaps/vtep-b-underlay.pcap
+fi
 
 log "Collection complete"
