@@ -14,7 +14,8 @@ the existing parent bridge.
 
 ## Default QinQ Mode
 
-`NETWORK_MODE=qinq` is the default. Each run creates:
+`NETWORK_MODE=qinq` is the default. Each run creates one QinQ zone and one VNet
+per topology network. The default topology creates:
 
 ```text
 zone:       pq<RUN_ID % 1000000>
@@ -29,7 +30,7 @@ The generated QinQ zone uses an outer service VLAN:
 QINQ_SERVICE_VLAN=$(( QINQ_SERVICE_VLAN_BASE + RUN_ID % QINQ_SERVICE_VLAN_COUNT ))
 ```
 
-The three generated VNets use fixed inner VLANs:
+The default topology VNets use fixed inner VLANs:
 
 ```text
 left-l2:   101
@@ -37,9 +38,9 @@ underlay:  102
 right-l2:  103
 ```
 
-VM NICs attach directly to the generated VNets. The guest VTEPs can later use
-their own VLAN tags inside the virtual traffic without colliding with the
-run-isolation VLANs.
+VM NICs attach directly to the generated VNets. Topology networks can be marked
+as `access` or `trunk`; v1 preserves that metadata and uses it to make future
+guest-visible VLAN tests explicit.
 
 The cleanup path deletes the generated VNets and zone after the VMs are
 destroyed. Generated SDN names are intentionally short because Proxmox bridge

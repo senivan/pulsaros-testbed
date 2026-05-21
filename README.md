@@ -16,6 +16,7 @@ The GitHub runner is only the orchestrator. Each run creates fresh Proxmox VMs, 
 - Uses existing Proxmox infrastructure:
   - `vmbr0` for management
   - `vmbr-test` as the parent bridge for generated Proxmox SDN QinQ VNets
+- Reads topology from `topologies/linux-vxlan-reference.yml`.
 - Runs kernel, hugepage, DPDK availability, and Linux VXLAN reference tests.
 - Uploads artifacts from `artifacts/`, `logs/`, `pcaps/`, and `junit/`.
 
@@ -41,7 +42,7 @@ Do not give the runner passwordless sudo ALL.
 - Existing SDN parent bridge, default `vmbr-test`.
 - Proxmox SDN support available through `pvesh`.
 - Runner user can run the required `qm`, `pvesh`, and `pvesm` operations through a restricted mechanism.
-- Runner has `ansible-playbook`, `pytest`, `ssh`, `scp`, and `jq`.
+- Runner has `ansible-playbook`, `pytest`, `ssh`, `scp`, `jq`, and `python3-yaml`.
 
 ## Template VM Requirements
 
@@ -101,6 +102,15 @@ single VLAN-aware bridge behavior, set:
 export NETWORK_MODE=bridge
 export TEST_BRIDGE=vmbr-test
 ```
+
+To add a new topology, add a YAML file under `topologies/` and run with:
+
+```bash
+export TOPOLOGY=<file-name-without-.yml>
+```
+
+The create step renders `artifacts/topology.json`, `artifacts/topology.env`,
+`ansible/inventory.generated.ini`, and `ansible/site.generated.yml`.
 
 ## GitHub Actions Run
 
