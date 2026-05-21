@@ -2,27 +2,29 @@
 
 Disposable Proxmox CI testbed for PulsarOS kernel and DPDK VXLAN development.
 
-The GitHub runner is only the orchestrator. Each run creates fresh Proxmox VMs, provisions them with Ansible, runs the selected pytest scenario, collects logs and pcaps, then destroys the VMs even if the scenario fails.
+The GitHub runner is only the orchestrator. Each run renders a topology, creates fresh Proxmox VMs, provisions them with Ansible, runs the selected pytest scenario, collects logs and pcaps, then destroys the generated resources unless explicitly told to keep them for debugging.
 
-## What v1 Does
+## What It Does
 
-- Clones four VMs from one Proxmox template using `qm`.
-- Builds this topology:
+- Clones disposable VMs from one Proxmox template using `qm`.
+- Reads topology-as-code from `topologies/*.yml`.
+- Defaults to this Linux VXLAN reference topology:
 
   ```text
   client-a -- vtep-a -- underlay -- vtep-b -- client-b
   ```
 
-- Uses existing Proxmox infrastructure:
-  - `vmbr0` for management
-  - `vmbr-test` as the parent bridge for generated Proxmox SDN QinQ VNets
-- Reads topology from `topologies/linux-vxlan-reference.yml`.
+- Uses `vmbr0` by default for management.
+- Uses Proxmox SDN QinQ by default for disposable dataplane networks on top of `vmbr-test`.
+- Renders per-run state into `artifacts/topology.json` and compatibility values into `artifacts/topology.env`.
+- Generates `ansible/inventory.generated.ini` and `ansible/site.generated.yml`.
+- Can build PulsarOS kernel RPMs on a GitHub-hosted runner and install them into the Proxmox VMs.
 - Runs kernel, hugepage, DPDK availability, and Linux VXLAN reference tests.
-- Uploads artifacts from `artifacts/`, `logs/`, `pcaps/`, and `junit/`.
+- Uploads artifacts from `artifacts/`, `logs/`, `pcaps/`, and `junit/`, plus optional Gemini artifact analysis.
 
-## What v1 Does Not Do
+## What It Does Not Do Yet
 
-v1 does not implement custom ISO generation, a PulsarOS installer, OVS-DPDK, SR-IOV, PCI passthrough, Proxmox API support, multi-node scheduling, a web dashboard, or custom DPDK VXLAN app validation.
+The repo does not yet implement custom ISO generation, a PulsarOS installer, OVS-DPDK, SR-IOV, PCI passthrough, multi-node Proxmox scheduling, a web dashboard, or custom DPDK VXLAN app validation.
 
 ## Security Warning
 
@@ -36,7 +38,7 @@ Do not give the runner passwordless sudo ALL.
 
 ## Proxmox Host Requirements
 
-- Proxmox VE host with `qm`, `pvesm`, `pvecm`, and `/etc/pve`.
+- Proxmox VE host with `qm`, `pvesh`, `pvesm`, `pvecm`, and `/etc/pve`.
 - Existing template VM, default VMID `9000`.
 - Existing management bridge, default `vmbr0`.
 - Existing SDN parent bridge, default `vmbr-test`.
@@ -95,13 +97,30 @@ RUN_ID=<failed-run-id> make destroy
 
 The default dataplane mode is `NETWORK_MODE=qinq`. Each run creates temporary
 Proxmox SDN QinQ objects with generated names like `pq123456`, `pl123456`,
-`pu123456`, and `pr123456`, then deletes them during destroy. To use the old
-single VLAN-aware bridge behavior, set:
+`pu123456`, and `pr123456`, then deletes them during destroy. The setup phase
+does touch Proxmox SDN, but the realized test networks are disposable and
+per-run. To use the older single VLAN-aware bridge behavior, set:
 
 ```bash
 export NETWORK_MODE=bridge
 export TEST_BRIDGE=vmbr-test
 ```
+
+## Topology-as-Code
+
+Topologies are YAML files under `topologies/`. The default file is:
+
+```text
+topologies/linux-vxlan-reference.yml
+```
+
+Topology YAML declares:
+
+- Logical networks and their generated VNet prefixes.
+- Hosts, VMID offsets, groups, and NICs.
+- Ansible host variables.
+- The generated playbook roles.
+- Compatibility aliases for existing tests and scripts.
 
 To add a new topology, add a YAML file under `topologies/` and run with:
 
@@ -120,13 +139,17 @@ Open:
 Actions -> Proxmox PulsarOS Testbed -> Run workflow
 ```
 
-Use scenario:
+Default useful inputs:
 
 ```text
-linux-vxlan-reference
+topology=linux-vxlan-reference
+scenario=linux-vxlan-reference
+network_mode=qinq
+sdn_bridge=vmbr-test
+kernel_source=none
 ```
 
-The workflow always attempts log collection, VM destruction, and artifact upload.
+The workflow always attempts log collection, VM destruction, and artifact upload. Set `keep_vms_on_failure=true` when debugging boot or provisioning failures.
 
 ## Custom Kernel Runs
 
@@ -138,7 +161,7 @@ Use:
 kernel_source=pulsaros-kernel-git
 kernel_repo=https://github.com/senivan/PulsarOS-kernel.git
 kernel_ref=main
-kernel_version=6.16
+kernel_version=7.0.9
 ```
 
 Flow:
@@ -159,7 +182,7 @@ export KERNEL_EXPECTED_RELEASE=pulsaros
 make provision
 ```
 
-The testbed intentionally overrides root-related boot arguments on the installed PulsarOS kernel. This avoids inheriting package defaults like `rootfstype=ext4` when the Fedora template actually boots from another filesystem such as btrfs or xfs.
+The testbed intentionally reuses the template kernel's known-good root-related boot arguments on the installed PulsarOS kernel. This avoids inheriting package defaults like `rootfstype=ext4` when the Fedora template actually boots from another filesystem such as xfs, btrfs, or LVM-backed roots.
 
 For kernel boot debugging, set:
 
@@ -198,7 +221,10 @@ and generated QinQ SDN names derived from the same run ID.
 
 ## Artifacts
 
-- `artifacts/topology.env`: generated VM IDs, network objects, VLANs, MACs, and IPs.
+- `artifacts/topology.json`: canonical resolved topology for the run.
+- `artifacts/topology.env`: compatibility values for existing tests and shell scripts.
+- `ansible/inventory.generated.ini`: generated Ansible inventory.
+- `ansible/site.generated.yml`: generated Ansible playbook.
 - `logs/`: dmesg, journal, ip link, ip addr, and uname output.
 - `pcaps/`: VXLAN underlay captures from VTEPs.
 - `junit/`: pytest JUnit XML reports.
