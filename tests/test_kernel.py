@@ -1,4 +1,5 @@
 import os
+import re
 
 from conftest import ssh
 
@@ -24,9 +25,11 @@ def test_custom_kernel_marker_when_requested(topology, ssh_user, ssh_key):
 
 
 def test_dmesg_has_no_panic_or_oops(topology, ssh_user, ssh_key):
-    forbidden = ("kernel panic", "oops")
+    forbidden = {
+        "kernel panic": re.compile(r"\bkernel panic\b", re.IGNORECASE),
+        "kernel oops": re.compile(r"\b(?:oops|kernel oops):\b", re.IGNORECASE),
+    }
     for host in ("client-a", "client-b", "vtep-a", "vtep-b"):
         result = ssh(topology, ssh_user, ssh_key, host, "sudo -n dmesg || dmesg")
-        lower = result.stdout.lower()
-        for needle in forbidden:
-            assert needle not in lower, f"{host} dmesg contains {needle}"
+        for label, pattern in forbidden.items():
+            assert not pattern.search(result.stdout), f"{host} dmesg contains {label}"
