@@ -12,8 +12,34 @@ run_pve() {
   fi
 }
 
+run_suffix_for() {
+  local run_id="$1"
+  printf '%06d' $((run_id % 1000000))
+}
+
+delete_sdn_for_run() {
+  local run_id="$1" suffix zone left underlay right
+  suffix=$(run_suffix_for "$run_id")
+  zone="pq${suffix}"
+  left="pl${suffix}"
+  underlay="pu${suffix}"
+  right="pr${suffix}"
+
+  if (( YES == 1 )); then
+    log "Deleting stale QinQ SDN objects for run $run_id"
+    run_pve pvesh delete "/cluster/sdn/vnets/$left" || true
+    run_pve pvesh delete "/cluster/sdn/vnets/$underlay" || true
+    run_pve pvesh delete "/cluster/sdn/vnets/$right" || true
+    run_pve pvesh delete "/cluster/sdn/zones/$zone" || true
+    SDN_CHANGED=1
+  else
+    log "Would delete stale QinQ SDN objects for run $run_id: $left $underlay $right $zone"
+  fi
+}
+
 OLDER_THAN_HOURS=""
 YES=0
+SDN_CHANGED=0
 
 while (($#)); do
   case "$1" in
@@ -36,6 +62,7 @@ done
 now=$(date +%s)
 max_age=$((OLDER_THAN_HOURS * 3600))
 found=0
+declare -A STALE_RUN_IDS=()
 
 while read -r vmid name; do
   [[ -n "$vmid" && -n "$name" ]] || continue
@@ -57,7 +84,19 @@ while read -r vmid name; do
   else
     log "Would delete stale VM $name ($vmid)"
   fi
+  if [[ "$name" =~ ^pulsar-([0-9]+)- ]]; then
+    STALE_RUN_IDS["${BASH_REMATCH[1]}"]=1
+  fi
 done < <(run_pve qm list | awk 'NR > 1 {print $1, $2}')
+
+for stale_run_id in "${!STALE_RUN_IDS[@]}"; do
+  delete_sdn_for_run "$stale_run_id"
+done
+
+if (( SDN_CHANGED == 1 )); then
+  log "Applying Proxmox SDN configuration"
+  run_pve pvesh set /cluster/sdn || true
+fi
 
 if (( found == 0 )); then
   log "No stale generated VMs found"

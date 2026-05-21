@@ -17,7 +17,17 @@ run_pve() {
 need_env TEMPLATE_ID
 need_env STORAGE
 need_env MGMT_BRIDGE
-need_env TEST_BRIDGE
+NETWORK_MODE="${NETWORK_MODE:-qinq}"
+case "$NETWORK_MODE" in
+  qinq|bridge) ;;
+  *) die "NETWORK_MODE must be qinq or bridge, got: $NETWORK_MODE" ;;
+esac
+
+if [[ "$NETWORK_MODE" == "bridge" ]]; then
+  need_env TEST_BRIDGE
+else
+  SDN_BRIDGE="${SDN_BRIDGE:-${TEST_BRIDGE:-vmbr-test}}"
+fi
 
 log "Checking required commands"
 for cmd in sudo qm pvesh pveversion pvesm ansible-playbook pytest ssh scp jq df; do
@@ -43,9 +53,18 @@ fi
 log "Checking storage $STORAGE"
 run_pve pvesm status --storage "$STORAGE" >/dev/null 2>&1 || die "storage $STORAGE is not available"
 
-log "Checking bridges $MGMT_BRIDGE and $TEST_BRIDGE"
+log "Checking management bridge $MGMT_BRIDGE"
 [[ -d "/sys/class/net/$MGMT_BRIDGE" ]] || die "management bridge $MGMT_BRIDGE not found"
-[[ -d "/sys/class/net/$TEST_BRIDGE" ]] || die "test bridge $TEST_BRIDGE not found"
+
+if [[ "$NETWORK_MODE" == "bridge" ]]; then
+  log "Checking legacy test bridge $TEST_BRIDGE"
+  [[ -d "/sys/class/net/$TEST_BRIDGE" ]] || die "test bridge $TEST_BRIDGE not found"
+else
+  log "Checking QinQ SDN bridge $SDN_BRIDGE"
+  [[ -d "/sys/class/net/$SDN_BRIDGE" ]] || die "SDN bridge $SDN_BRIDGE not found"
+  run_pve pvesh get /cluster/sdn/zones >/dev/null 2>&1 || die "cannot read Proxmox SDN zones"
+  run_pve pvesh get /cluster/sdn/vnets >/dev/null 2>&1 || die "cannot read Proxmox SDN VNets"
+fi
 
 log "Checking free disk space on current filesystem"
 available_kb=$(df -Pk . | awk 'NR == 2 {print $4}')

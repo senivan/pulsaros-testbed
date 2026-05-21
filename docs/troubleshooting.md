@@ -23,10 +23,15 @@ Check `logs/*-ip-link.log`, `logs/*-ip-addr.log`, and `artifacts/topology.env`.
 
 Common causes:
 
-- `vmbr-test` is not VLAN-aware.
+- In `qinq` mode, Proxmox SDN did not create or apply the generated VNets.
+- In `bridge` mode, `vmbr-test` is not VLAN-aware.
 - Dataplane NICs did not attach correctly.
 - The template firewall blocks ICMP or VXLAN traffic.
 - The VTEPs cannot reach each other on `172.16.100.0/30`.
+
+For QinQ runs, `artifacts/topology.env` contains the generated zone and VNet
+names. Check that those names exist on the Proxmox host and that the VM NICs are
+attached to them.
 
 ## Cleanup
 

@@ -25,10 +25,30 @@ on:
         description: "Management bridge"
         required: true
         default: "vmbr0"
-      test_bridge:
-        description: "VLAN-aware test bridge"
+      network_mode:
+        description: "Dataplane isolation mode"
+        required: true
+        default: "qinq"
+        type: choice
+        options:
+          - qinq
+          - bridge
+      sdn_bridge:
+        description: "Proxmox SDN parent bridge for QinQ mode"
         required: true
         default: "vmbr-test"
+      test_bridge:
+        description: "Legacy VLAN-aware test bridge for bridge mode"
+        required: true
+        default: "vmbr-test"
+      qinq_service_vlan_base:
+        description: "QinQ service VLAN base"
+        required: true
+        default: "3000"
+      qinq_service_vlan_count:
+        description: "QinQ service VLAN allocation count"
+        required: true
+        default: "500"
       kernel_source:
         description: "Custom kernel source"
         required: true
@@ -178,7 +198,11 @@ jobs:
       TEMPLATE_ID: ${{ inputs.template_vmid }}
       STORAGE: ${{ inputs.storage }}
       MGMT_BRIDGE: ${{ inputs.mgmt_bridge }}
+      NETWORK_MODE: ${{ inputs.network_mode }}
+      SDN_BRIDGE: ${{ inputs.sdn_bridge }}
       TEST_BRIDGE: ${{ inputs.test_bridge }}
+      QINQ_SERVICE_VLAN_BASE: ${{ inputs.qinq_service_vlan_base }}
+      QINQ_SERVICE_VLAN_COUNT: ${{ inputs.qinq_service_vlan_count }}
       KERNEL_SOURCE: ${{ inputs.kernel_source }}
       KERNEL_RPM_URL: ${{ inputs.kernel_rpm_url }}
       KERNEL_EXPECTED_RELEASE: ${{ inputs.kernel_source != 'none' && 'pulsaros' || '' }}
