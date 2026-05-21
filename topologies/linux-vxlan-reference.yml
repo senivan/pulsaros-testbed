@@ -1,0 +1,153 @@
+schema_version: 1
+name: linux-vxlan-reference
+description: Four-VM Linux VXLAN reference topology.
+
+networks:
+  left-l2:
+    mode: access
+    vnet_prefix: pl
+    inner_vlan: 101
+    legacy_vlan_offset: 1
+  underlay:
+    mode: access
+    vnet_prefix: pu
+    inner_vlan: 102
+    legacy_vlan_offset: 2
+  right-l2:
+    mode: access
+    vnet_prefix: pr
+    inner_vlan: 103
+    legacy_vlan_offset: 3
+
+hosts:
+  client-a:
+    vmid_offset: 1
+    groups:
+      - clients
+    nics:
+      - name: mgmt
+        network: management
+        mac_offset: 1
+        management: true
+      - name: left
+        network: left-l2
+        mac_offset: 11
+    ansible_vars:
+      dataplane_mac: "@nic:left.mac"
+      dataplane_ip: 10.10.0.1/24
+      peer_ip: 10.10.0.2
+      peer_mac: "@host:client-b.nic:right.mac"
+
+  vtep-a:
+    vmid_offset: 2
+    groups:
+      - vteps
+    nics:
+      - name: mgmt
+        network: management
+        mac_offset: 2
+        management: true
+      - name: left
+        network: left-l2
+        mac_offset: 12
+      - name: underlay
+        network: underlay
+        mac_offset: 22
+    ansible_vars:
+      left_mac: "@nic:left.mac"
+      underlay_mac: "@nic:underlay.mac"
+      underlay_ip: 172.16.100.1/30
+      vxlan_remote: 172.16.100.2
+      remote_client_mac: "@host:client-b.nic:right.mac"
+
+  vtep-b:
+    vmid_offset: 3
+    groups:
+      - vteps
+    nics:
+      - name: mgmt
+        network: management
+        mac_offset: 3
+        management: true
+      - name: underlay
+        network: underlay
+        mac_offset: 23
+      - name: right
+        network: right-l2
+        mac_offset: 33
+    ansible_vars:
+      underlay_mac: "@nic:underlay.mac"
+      right_mac: "@nic:right.mac"
+      underlay_ip: 172.16.100.2/30
+      vxlan_remote: 172.16.100.1
+      remote_client_mac: "@host:client-a.nic:left.mac"
+
+  client-b:
+    vmid_offset: 4
+    groups:
+      - clients
+    nics:
+      - name: mgmt
+        network: management
+        mac_offset: 4
+        management: true
+      - name: right
+        network: right-l2
+        mac_offset: 14
+    ansible_vars:
+      dataplane_mac: "@nic:right.mac"
+      dataplane_ip: 10.10.0.2/24
+      peer_ip: 10.10.0.1
+      peer_mac: "@host:client-a.nic:left.mac"
+
+plays:
+  - name: Provision all testbed VMs
+    hosts: all
+    become: true
+    roles:
+      - common
+      - kernel
+  - name: Provision VTEP dataplane prerequisites
+    hosts: vteps
+    become: true
+    roles:
+      - hugepages
+      - dpdk
+  - name: Configure Linux VXLAN reference topology
+    hosts: all
+    become: true
+    roles:
+      - vxlan-test
+
+compat:
+  CLIENT_A: "@host:client-a.vmid"
+  VTEP_A: "@host:vtep-a.vmid"
+  VTEP_B: "@host:vtep-b.vmid"
+  CLIENT_B: "@host:client-b.vmid"
+  CLIENT_A_NAME: "@host:client-a.vm_name"
+  VTEP_A_NAME: "@host:vtep-a.vm_name"
+  VTEP_B_NAME: "@host:vtep-b.vm_name"
+  CLIENT_B_NAME: "@host:client-b.vm_name"
+  CLIENT_A_IP: "@host:client-a.management_ip"
+  VTEP_A_IP: "@host:vtep-a.management_ip"
+  VTEP_B_IP: "@host:vtep-b.management_ip"
+  CLIENT_B_IP: "@host:client-b.management_ip"
+  CLIENT_A_MGMT_MAC: "@host:client-a.nic:mgmt.mac"
+  CLIENT_A_LEFT_MAC: "@host:client-a.nic:left.mac"
+  VTEP_A_MGMT_MAC: "@host:vtep-a.nic:mgmt.mac"
+  VTEP_A_LEFT_MAC: "@host:vtep-a.nic:left.mac"
+  VTEP_A_UNDERLAY_MAC: "@host:vtep-a.nic:underlay.mac"
+  VTEP_B_MGMT_MAC: "@host:vtep-b.nic:mgmt.mac"
+  VTEP_B_UNDERLAY_MAC: "@host:vtep-b.nic:underlay.mac"
+  VTEP_B_RIGHT_MAC: "@host:vtep-b.nic:right.mac"
+  CLIENT_B_MGMT_MAC: "@host:client-b.nic:mgmt.mac"
+  CLIENT_B_RIGHT_MAC: "@host:client-b.nic:right.mac"
+  LEFT_VLAN: "@network:left-l2.vlan"
+  UNDERLAY_VLAN: "@network:underlay.vlan"
+  RIGHT_VLAN: "@network:right-l2.vlan"
+  LEFT_INNER_VLAN: "@network:left-l2.inner_vlan"
+  UNDERLAY_INNER_VLAN: "@network:underlay.inner_vlan"
+  RIGHT_INNER_VLAN: "@network:right-l2.inner_vlan"
+  LEFT_VNET: "@network:left-l2.vnet"
+  UNDERLAY_VNET: "@network:underlay.vnet"
+  RIGHT_VNET: "@network:right-l2.vnet"
