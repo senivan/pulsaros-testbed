@@ -48,14 +48,9 @@
 - name: Capture current working boot arguments
   ansible.builtin.shell: |
     set -euo pipefail
-    grubby --info=DEFAULT | awk '
-      /^args="/ {
-        value=$0
-        sub(/^args="/, "", value)
-        sub(/"$/, "", value)
-        print value
-      }
-    '
+    tr ' ' '\n' < /proc/cmdline \
+      | grep -v '^BOOT_IMAGE=' \
+      | paste -sd ' ' -
   args:
     executable: /bin/bash
   register: kernel_working_args
@@ -92,7 +87,8 @@
       # The kernel RPM may add rootfstype=ext4 unconditionally. Reuse the
       # template kernel's known-good root args so Fedora btrfs/xfs templates boot.
       grubby --update-kernel "$kernel" \
-        --remove-args "root rootfstype rootflags ro rw resume rd.luks.uuid rd.lvm.lv rd.md.uuid rd.dm.uuid" \
+        --remove-args "root rootfstype rootflags ro rw resume rd.luks.uuid rd.lvm.lv rd.md.uuid rd.dm.uuid"
+      grubby --update-kernel "$kernel" \
         --args "$working_args $extra_args"
       grubby --set-default "$kernel"
       echo "Selected $latest with root filesystem ${root_fstype}"
