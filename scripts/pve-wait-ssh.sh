@@ -70,13 +70,15 @@ wait_for_ssh() {
   die "timed out waiting for SSH on $label ($ip)"
 }
 
+host_list=$(jq -r '.hosts[] | [.name, .vmid] | @tsv' artifacts/topology.json)
 host_ip_args=()
 while IFS=$'\t' read -r host vmid; do
+  [[ -n "$host" ]] || continue
   ip=$(wait_for_ip "$host" "$vmid")
   wait_for_ssh "$host" "$ip"
   host_ip_args+=("${host}=${ip}")
   ./scripts/render-topology.py update-ips "${host_ip_args[@]}"
-done < <(jq -r '.hosts[] | [.name, .vmid] | @tsv' artifacts/topology.json)
+done <<<"$host_list"
 
 ./scripts/render-topology.py update-ips "${host_ip_args[@]}"
 log "Updated artifacts/topology.json and artifacts/topology.env with management IPs"
