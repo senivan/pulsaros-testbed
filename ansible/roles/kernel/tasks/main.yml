@@ -136,7 +136,7 @@
       require_builtin_or_module CONFIG_CGROUP_SCHED
       require_builtin_or_module CONFIG_MEMCG
       require_builtin_or_module CONFIG_TMPFS
-      require_builtin_or_module CONFIG_DEVPTS_FS
+      require_builtin_or_module CONFIG_UNIX98_PTYS
       require_builtin_or_module CONFIG_NET
       require_builtin_or_module CONFIG_INET
       require_builtin_or_module CONFIG_NETDEVICES

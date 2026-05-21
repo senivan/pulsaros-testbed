@@ -88,7 +88,7 @@ validate_rpm() {
   require_builtin_or_module "$config" CONFIG_CGROUP_SCHED
   require_builtin_or_module "$config" CONFIG_MEMCG
   require_builtin_or_module "$config" CONFIG_TMPFS
-  require_builtin_or_module "$config" CONFIG_DEVPTS_FS
+  require_builtin_or_module "$config" CONFIG_UNIX98_PTYS
   require_builtin_or_module "$config" CONFIG_NET
   require_builtin_or_module "$config" CONFIG_INET
   require_builtin_or_module "$config" CONFIG_NETDEVICES
