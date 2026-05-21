@@ -15,7 +15,7 @@ run_pve() {
 
 sdn_name_is_generated() {
   local name="$1"
-  [[ "$name" =~ ^p[qlur][0-9]{6}$ ]]
+  [[ "$name" =~ ^[a-z][a-z0-9]?[0-9]{6}$ ]]
 }
 
 sdn_apply() {
@@ -31,7 +31,7 @@ if [[ -f artifacts/topology.env ]]; then
   # shellcheck disable=SC1091
   source artifacts/topology.env
   [[ "${RUN_ID:-}" == "$REQUESTED_RUN_ID" ]] || die "topology RUN_ID does not match requested RUN_ID"
-else
+elif [[ ! -f artifacts/topology.json ]]; then
   BASE=$(( 200000 + REQUESTED_RUN_ID % 50000 ))
   CLIENT_A=$((BASE + 1))
   VTEP_A=$((BASE + 2))
@@ -60,23 +60,38 @@ destroy_one() {
   run_pve qm destroy "$vmid" --purge 1 || true
 }
 
-destroy_one "$CLIENT_A" "$CLIENT_A_NAME"
-destroy_one "$VTEP_A" "$VTEP_A_NAME"
-destroy_one "$VTEP_B" "$VTEP_B_NAME"
-destroy_one "$CLIENT_B" "$CLIENT_B_NAME"
+if [[ -f artifacts/topology.json ]]; then
+  while IFS=$'\t' read -r vmid vm_name; do
+    destroy_one "$vmid" "$vm_name"
+  done < <(jq -r '.hosts[] | [.vmid, .vm_name] | @tsv' artifacts/topology.json)
+else
+  destroy_one "$CLIENT_A" "$CLIENT_A_NAME"
+  destroy_one "$VTEP_A" "$VTEP_A_NAME"
+  destroy_one "$VTEP_B" "$VTEP_B_NAME"
+  destroy_one "$CLIENT_B" "$CLIENT_B_NAME"
+fi
 
 if [[ "${NETWORK_MODE:-bridge}" == "qinq" ]]; then
-  for sdn_name in "${LEFT_VNET:-}" "${UNDERLAY_VNET:-}" "${RIGHT_VNET:-}" "${QINQ_ZONE:-}"; do
-    [[ -n "$sdn_name" ]] || die "missing generated QinQ SDN name in topology.env"
-    sdn_name_is_generated "$sdn_name" || die "refusing to delete unexpected SDN object name: $sdn_name"
-  done
-
   log "Deleting generated QinQ SDN VNets"
-  run_pve pvesh delete "/cluster/sdn/vnets/$LEFT_VNET" || true
-  run_pve pvesh delete "/cluster/sdn/vnets/$UNDERLAY_VNET" || true
-  run_pve pvesh delete "/cluster/sdn/vnets/$RIGHT_VNET" || true
-  log "Deleting generated QinQ SDN zone $QINQ_ZONE"
-  run_pve pvesh delete "/cluster/sdn/zones/$QINQ_ZONE" || true
+  if [[ -f artifacts/topology.json ]]; then
+    while IFS= read -r vnet; do
+      sdn_name_is_generated "$vnet" || die "refusing to delete unexpected SDN VNet name: $vnet"
+      run_pve pvesh delete "/cluster/sdn/vnets/$vnet" || true
+    done < <(jq -r '.networks[] | select(.vnet != "") | .vnet' artifacts/topology.json)
+    zone=$(jq -r '.qinq.zone' artifacts/topology.json)
+  else
+    for sdn_name in "${LEFT_VNET:-}" "${UNDERLAY_VNET:-}" "${RIGHT_VNET:-}" "${QINQ_ZONE:-}"; do
+      [[ -n "$sdn_name" ]] || die "missing generated QinQ SDN name in topology.env"
+      sdn_name_is_generated "$sdn_name" || die "refusing to delete unexpected SDN object name: $sdn_name"
+    done
+    run_pve pvesh delete "/cluster/sdn/vnets/$LEFT_VNET" || true
+    run_pve pvesh delete "/cluster/sdn/vnets/$UNDERLAY_VNET" || true
+    run_pve pvesh delete "/cluster/sdn/vnets/$RIGHT_VNET" || true
+    zone="$QINQ_ZONE"
+  fi
+  log "Deleting generated QinQ SDN zone $zone"
+  sdn_name_is_generated "$zone" || die "refusing to delete unexpected SDN zone name: $zone"
+  run_pve pvesh delete "/cluster/sdn/zones/$zone" || true
   sdn_apply || warn "SDN apply failed after deletion"
 fi
 

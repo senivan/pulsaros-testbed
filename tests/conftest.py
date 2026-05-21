@@ -1,4 +1,5 @@
 import os
+import json
 import pathlib
 import shlex
 import subprocess
@@ -8,6 +9,7 @@ import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 TOPOLOGY = ROOT / "artifacts" / "topology.env"
+TOPOLOGY_JSON = ROOT / "artifacts" / "topology.json"
 PCAPS = ROOT / "pcaps"
 
 
@@ -32,13 +34,45 @@ def _load_env_file(path):
     return data
 
 
+def _load_json_file(path):
+    if not path.exists():
+        return {}
+    return json.loads(path.read_text())
+
+
 @pytest.fixture(scope="session")
 def topology():
     data = _load_env_file(TOPOLOGY)
+    resolved = _load_json_file(TOPOLOGY_JSON)
+    if resolved:
+        data["__hosts__"] = resolved.get("hosts", {})
+        missing = [
+            host
+            for host, values in data["__hosts__"].items()
+            if not values.get("management_ip")
+        ]
+        if missing:
+            pytest.fail(f"missing management IPs: {', '.join(missing)}")
+        return data
     missing = [name for name in HOSTS.values() if not data.get(name)]
     if missing:
         pytest.fail(f"missing topology values: {', '.join(missing)}")
     return data
+
+
+def all_hosts(topology):
+    return tuple(topology.get("__hosts__", HOSTS).keys())
+
+
+def group_hosts(topology, group):
+    hosts = topology.get("__hosts__")
+    if not hosts:
+        if group == "vteps":
+            return ("vtep-a", "vtep-b")
+        if group == "clients":
+            return ("client-a", "client-b")
+        return all_hosts(topology)
+    return tuple(name for name, values in hosts.items() if group in values.get("groups", []))
 
 
 @pytest.fixture(scope="session")
@@ -54,7 +88,10 @@ def ssh_key():
 
 
 def ssh(topology, ssh_user, ssh_key, host, command, timeout=60, check=True):
-    ip = topology[HOSTS[host]]
+    if "__hosts__" in topology:
+        ip = topology["__hosts__"][host]["management_ip"]
+    else:
+        ip = topology[HOSTS[host]]
     args = [
         "ssh",
         "-i",
@@ -79,7 +116,10 @@ def ssh(topology, ssh_user, ssh_key, host, command, timeout=60, check=True):
 
 
 def scp_from(topology, ssh_user, ssh_key, host, remote_path, local_path, timeout=60):
-    ip = topology[HOSTS[host]]
+    if "__hosts__" in topology:
+        ip = topology["__hosts__"][host]["management_ip"]
+    else:
+        ip = topology[HOSTS[host]]
     local_path = pathlib.Path(local_path)
     local_path.parent.mkdir(parents=True, exist_ok=True)
     args = [
