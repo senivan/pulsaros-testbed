@@ -13,9 +13,9 @@ The GitHub runner is only the orchestrator. Each run creates fresh Proxmox VMs, 
   client-a -- vtep-a -- underlay -- vtep-b -- client-b
   ```
 
-- Uses existing Proxmox bridges:
+- Uses existing Proxmox infrastructure:
   - `vmbr0` for management
-  - `vmbr-test` for VLAN-tagged dataplane networks
+  - `vmbr-test` as the parent bridge for generated Proxmox SDN QinQ VNets
 - Runs kernel, hugepage, DPDK availability, and Linux VXLAN reference tests.
 - Uploads artifacts from `artifacts/`, `logs/`, `pcaps/`, and `junit/`.
 
@@ -38,8 +38,9 @@ Do not give the runner passwordless sudo ALL.
 - Proxmox VE host with `qm`, `pvesm`, `pvecm`, and `/etc/pve`.
 - Existing template VM, default VMID `9000`.
 - Existing management bridge, default `vmbr0`.
-- Existing VLAN-aware test bridge, default `vmbr-test`.
-- Runner user can run the required `qm` operations through a restricted mechanism.
+- Existing SDN parent bridge, default `vmbr-test`.
+- Proxmox SDN support available through `pvesh`.
+- Runner user can run the required `qm`, `pvesh`, and `pvesm` operations through a restricted mechanism.
 - Runner has `ansible-playbook`, `pytest`, `ssh`, `scp`, and `jq`.
 
 ## Template VM Requirements
@@ -89,6 +90,16 @@ If a run fails before cleanup:
 
 ```bash
 RUN_ID=<failed-run-id> make destroy
+```
+
+The default dataplane mode is `NETWORK_MODE=qinq`. Each run creates temporary
+Proxmox SDN QinQ objects with generated names like `pq123456`, `pl123456`,
+`pu123456`, and `pr123456`, then deletes them during destroy. To use the old
+single VLAN-aware bridge behavior, set:
+
+```bash
+export NETWORK_MODE=bridge
+export TEST_BRIDGE=vmbr-test
 ```
 
 ## GitHub Actions Run
@@ -172,11 +183,12 @@ Delete stale generated VMs:
 ./scripts/cleanup-stale-runs.sh --older-than-hours 24 --yes
 ```
 
-The cleanup scripts only target generated names like `pulsar-<run-id>-client-a`.
+The cleanup scripts only target generated names like `pulsar-<run-id>-client-a`
+and generated QinQ SDN names derived from the same run ID.
 
 ## Artifacts
 
-- `artifacts/topology.env`: generated VM IDs, VLANs, MACs, and IPs.
+- `artifacts/topology.env`: generated VM IDs, network objects, VLANs, MACs, and IPs.
 - `logs/`: dmesg, journal, ip link, ip addr, and uname output.
 - `pcaps/`: VXLAN underlay captures from VTEPs.
 - `junit/`: pytest JUnit XML reports.

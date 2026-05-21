@@ -13,6 +13,16 @@ run_pve() {
   fi
 }
 
+sdn_name_is_generated() {
+  local name="$1"
+  [[ "$name" =~ ^p[qlur][0-9]{6}$ ]]
+}
+
+sdn_apply() {
+  log "Applying Proxmox SDN configuration"
+  run_pve pvesh set /cluster/sdn
+}
+
 RUN_ID="${1:-}"
 [[ "$RUN_ID" =~ ^[0-9]+$ ]] || die "usage: $0 RUN_ID"
 REQUESTED_RUN_ID="$RUN_ID"
@@ -54,4 +64,20 @@ destroy_one "$CLIENT_A" "$CLIENT_A_NAME"
 destroy_one "$VTEP_A" "$VTEP_A_NAME"
 destroy_one "$VTEP_B" "$VTEP_B_NAME"
 destroy_one "$CLIENT_B" "$CLIENT_B_NAME"
+
+if [[ "${NETWORK_MODE:-bridge}" == "qinq" ]]; then
+  for sdn_name in "${LEFT_VNET:-}" "${UNDERLAY_VNET:-}" "${RIGHT_VNET:-}" "${QINQ_ZONE:-}"; do
+    [[ -n "$sdn_name" ]] || die "missing generated QinQ SDN name in topology.env"
+    sdn_name_is_generated "$sdn_name" || die "refusing to delete unexpected SDN object name: $sdn_name"
+  done
+
+  log "Deleting generated QinQ SDN VNets"
+  run_pve pvesh delete "/cluster/sdn/vnets/$LEFT_VNET" || true
+  run_pve pvesh delete "/cluster/sdn/vnets/$UNDERLAY_VNET" || true
+  run_pve pvesh delete "/cluster/sdn/vnets/$RIGHT_VNET" || true
+  log "Deleting generated QinQ SDN zone $QINQ_ZONE"
+  run_pve pvesh delete "/cluster/sdn/zones/$QINQ_ZONE" || true
+  sdn_apply || warn "SDN apply failed after deletion"
+fi
+
 log "Destroy complete"
