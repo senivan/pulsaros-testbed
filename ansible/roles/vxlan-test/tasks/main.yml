@@ -108,10 +108,8 @@
     ip link set vxlan100 promisc on
     ip link set vxlan100 master br-testbed
     ip link set vxlan100 up
-    if ! bridge fdb replace "{{ remote_client_mac | lower }}" dev vxlan100 dst "{{ vxlan_remote }}" self static; then
-      bridge fdb del "{{ remote_client_mac | lower }}" dev vxlan100 self 2>/dev/null || true
-      bridge fdb add "{{ remote_client_mac | lower }}" dev vxlan100 dst "{{ vxlan_remote }}" self static
-    fi
+    bridge fdb append 00:00:00:00:00:00 dev vxlan100 dst "{{ vxlan_remote }}" self 2>/dev/null || true
+    bridge fdb show dev vxlan100
   args:
     executable: /bin/bash
   changed_when: true
