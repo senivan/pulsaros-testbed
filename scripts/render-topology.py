@@ -136,7 +136,9 @@ def render(topology_path, previous=None):
 
     hosts = {}
     all_mac_offsets = []
-    previous_hosts = (previous or {}).get("hosts", {})
+    previous_hosts = {}
+    if previous and previous.get("run_id") == run_id:
+        previous_hosts = previous.get("hosts", {})
     for name, host in raw_hosts.items():
         if not re.fullmatch(r"[a-z0-9][a-z0-9-]*", name):
             die(f"invalid host name: {name}")

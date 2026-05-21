@@ -75,6 +75,7 @@ while IFS=$'\t' read -r host vmid; do
   ip=$(wait_for_ip "$host" "$vmid")
   wait_for_ssh "$host" "$ip"
   host_ip_args+=("${host}=${ip}")
+  ./scripts/render-topology.py update-ips "${host_ip_args[@]}"
 done < <(jq -r '.hosts[] | [.name, .vmid] | @tsv' artifacts/topology.json)
 
 ./scripts/render-topology.py update-ips "${host_ip_args[@]}"
