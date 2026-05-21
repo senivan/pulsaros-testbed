@@ -75,6 +75,11 @@ jobs:
       KVER: ${{ inputs.kernel_version }}
       INSTALL_RPMS: "0"
       CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_BASEDIR: ${{ github.workspace }}
+      CCACHE_COMPILERCHECK: content
+      CCACHE_MAXSIZE: 2G
+      CCACHE_NOHASHDIR: "true"
+      RPMBUILD_TOPDIR: ${{ github.workspace }}/rpmbuild
 
     steps:
       - name: Checkout repository
@@ -88,13 +93,23 @@ jobs:
             libelf-dev libncurses-dev libssl-dev dwarves
 
       - name: Restore ccache
-        uses: actions/cache@v4
+        id: ccache-restore
+        uses: actions/cache/restore@v4
         with:
           path: .ccache
-          key: pulsaros-kernel-ccache-${{ runner.os }}-${{ inputs.kernel_version }}-${{ inputs.kernel_ref }}
+          key: pulsaros-kernel-ccache-${{ runner.os }}-${{ inputs.kernel_version }}-${{ inputs.kernel_ref }}-${{ github.run_id }}
           restore-keys: |
+            pulsaros-kernel-ccache-${{ runner.os }}-${{ inputs.kernel_version }}-${{ inputs.kernel_ref }}-
             pulsaros-kernel-ccache-${{ runner.os }}-${{ inputs.kernel_version }}-
             pulsaros-kernel-ccache-${{ runner.os }}-
+
+      - name: Configure ccache
+        run: |
+          mkdir -p "$CCACHE_DIR"
+          ccache --set-config=max_size="$CCACHE_MAXSIZE"
+          ccache --set-config=compiler_check="$CCACHE_COMPILERCHECK"
+          ccache -z
+          ccache -s
 
       - name: Restore kernel tarball cache
         uses: actions/cache@v4
@@ -125,11 +140,12 @@ jobs:
           cp "kernel-${KVER}.tar.xz" ..
           scripts/update-spec.sh "$KVER"
           INSTALL_RPMS=0 scripts/build-rpm.sh
+          ccache -s
 
       - name: Collect kernel RPMs
         run: |
           mkdir -p artifacts/kernel-rpms
-          cp ~/rpmbuild/RPMS/*/kernel-*.rpm artifacts/kernel-rpms/
+          cp "$RPMBUILD_TOPDIR"/RPMS/*/kernel-*.rpm artifacts/kernel-rpms/
           rpm -qp --queryformat '%{NAME} %{VERSION}-%{RELEASE} %{ARCH}\n' artifacts/kernel-rpms/*.rpm \
             > artifacts/kernel-rpms/kernel-rpms.txt
 
@@ -142,6 +158,13 @@ jobs:
           name: pulsaros-kernel-rpms-${{ github.run_id }}
           path: artifacts/kernel-rpms/
           if-no-files-found: error
+
+      - name: Save ccache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .ccache
+          key: ${{ steps.ccache-restore.outputs.cache-primary-key }}
 
   testbed:
     needs: build-kernel
