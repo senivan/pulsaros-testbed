@@ -119,16 +119,26 @@ collect_guest_agent_cmd() {
 }
 
 if [[ -f artifacts/topology.json ]]; then
-  host_entries=$(jq -r '.hosts[] | [.name, .management_ip, .vmid] | @tsv' artifacts/topology.json)
+  host_entries=$(jq -r '.hosts[] | @base64' artifacts/topology.json)
 else
-  host_entries=$(printf '%s\n' \
-    "client-a	${CLIENT_A_IP:-}	${CLIENT_A:-}" \
-    "client-b	${CLIENT_B_IP:-}	${CLIENT_B:-}" \
-    "vtep-a	${VTEP_A_IP:-}	${VTEP_A:-}" \
-    "vtep-b	${VTEP_B_IP:-}	${VTEP_B:-}")
+  host_entries=$(jq -n -r \
+    --arg ca_ip "${CLIENT_A_IP:-}" --arg ca "${CLIENT_A:-}" \
+    --arg cb_ip "${CLIENT_B_IP:-}" --arg cb "${CLIENT_B:-}" \
+    --arg va_ip "${VTEP_A_IP:-}" --arg va "${VTEP_A:-}" \
+    --arg vb_ip "${VTEP_B_IP:-}" --arg vb "${VTEP_B:-}" \
+    '[
+      {name:"client-a", management_ip:$ca_ip, vmid:$ca},
+      {name:"client-b", management_ip:$cb_ip, vmid:$cb},
+      {name:"vtep-a", management_ip:$va_ip, vmid:$va},
+      {name:"vtep-b", management_ip:$vb_ip, vmid:$vb}
+    ][] | @base64')
 fi
 
-while IFS=$'\t' read -r host ip vmid; do
+while IFS= read -r entry; do
+  [[ -n "$entry" ]] || continue
+  host=$(printf '%s' "$entry" | base64 -d | jq -r '.name')
+  ip=$(printf '%s' "$entry" | base64 -d | jq -r '.management_ip // ""')
+  vmid=$(printf '%s' "$entry" | base64 -d | jq -r '.vmid // ""')
   [[ -n "$host" ]] || continue
   collect_pve_cmd "$host" "$vmid" qm-status qm status "$vmid" --verbose
   collect_pve_cmd "$host" "$vmid" qm-config qm config "$vmid"
