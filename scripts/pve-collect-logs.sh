@@ -81,7 +81,41 @@ collect_guest_agent_cmd() {
   local host="$1" vmid="$2" suffix="$3" cmd="$4"
   [[ -n "$vmid" ]] || return 0
   log "Collecting guest-agent $suffix from $host"
-  run_pve qm guest exec "$vmid" --capture-output -- /bin/sh -lc "$cmd" > "logs/${host}-guest-agent-${suffix}.log" 2>&1 || warn "failed to collect guest-agent $suffix from $host"
+  local log_path="logs/${host}-guest-agent-${suffix}.log"
+  local exec_output pid status
+  if ! exec_output="$(run_pve qm guest exec "$vmid" -- /bin/sh -lc "$cmd" 2>&1)"; then
+    printf '%s\n' "$exec_output" > "$log_path"
+    warn "failed to start guest-agent $suffix collection from $host"
+    return 0
+  fi
+
+  {
+    printf 'guest-exec:\n%s\n' "$exec_output"
+  } > "$log_path"
+
+  pid="$(printf '%s\n' "$exec_output" | sed -n 's/.*"pid"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' | head -n1)"
+  if [[ -z "$pid" ]]; then
+    warn "guest-agent $suffix collection from $host did not return a pid"
+    return 0
+  fi
+
+  for _ in {1..20}; do
+    status="$(run_pve qm guest exec-status "$vmid" "$pid" 2>&1 || true)"
+    {
+      printf '\nguest-exec-status:\n%s\n' "$status"
+      if command -v jq >/dev/null 2>&1 && command -v base64 >/dev/null 2>&1; then
+        printf '\nstdout:\n'
+        printf '%s\n' "$status" | jq -r '."out-data" // empty' 2>/dev/null | base64 -d 2>/dev/null || true
+        printf '\nstderr:\n'
+        printf '%s\n' "$status" | jq -r '."err-data" // empty' 2>/dev/null | base64 -d 2>/dev/null || true
+      fi
+    } >> "$log_path"
+    if grep -Eq '"exited"[[:space:]]*:[[:space:]]*(true|1)' <<<"$status"; then
+      return 0
+    fi
+    sleep 1
+  done
+  warn "guest-agent $suffix collection from $host did not finish before timeout"
 }
 
 for entry in \

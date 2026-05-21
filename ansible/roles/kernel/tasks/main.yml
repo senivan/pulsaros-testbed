@@ -48,9 +48,14 @@
 - name: Capture current working boot arguments
   ansible.builtin.shell: |
     set -euo pipefail
-    tr ' ' '\n' < /proc/cmdline \
+    args="$(tr ' ' '\n' < /proc/cmdline \
       | grep -v '^BOOT_IMAGE=' \
-      | paste -sd ' ' -
+      | paste -sd ' ' -)"
+    if ! grep -Eq '(^| )root=' <<<"$args"; then
+      echo "Current kernel command line is missing root=: $args" >&2
+      exit 1
+    fi
+    printf '%s\n' "$args"
   args:
     executable: /bin/bash
   register: kernel_working_args
@@ -93,9 +98,11 @@
         --title "PulsarOS Kernel ${latest}" \
         --args "$working_args $extra_args"
       grubby --set-default "$kernel"
-      grubby --info "$kernel"
-      if ! grubby --info "$kernel" | grep -q 'root='; then
-        echo "Custom kernel grubby entry is missing root= after update" >&2
+      grubby --info "$kernel" > /tmp/pulsaros-custom-kernel-grubby-info
+      cat /tmp/pulsaros-custom-kernel-grubby-info
+      if ! grep -Eq '^args=.*(^|[[:space:]"])root=' /tmp/pulsaros-custom-kernel-grubby-info; then
+        echo "Custom kernel grubby entry is missing root= after update:" >&2
+        cat /tmp/pulsaros-custom-kernel-grubby-info >&2
         exit 1
       fi
       echo "Selected $latest with root filesystem ${root_fstype}"
