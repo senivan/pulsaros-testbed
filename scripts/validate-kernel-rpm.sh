@@ -112,6 +112,12 @@ validate_rpm() {
   require_builtin_or_module "$config" CONFIG_NET
   require_builtin_or_module "$config" CONFIG_INET
   require_builtin_or_module "$config" CONFIG_NETDEVICES
+  require_builtin "$config" CONFIG_LLC
+  require_builtin "$config" CONFIG_STP
+  require_builtin "$config" CONFIG_BRIDGE
+  require_builtin "$config" CONFIG_BRIDGE_VLAN_FILTERING
+  require_builtin "$config" CONFIG_VLAN_8021Q
+  require_builtin "$config" CONFIG_VXLAN
   require_builtin_or_module "$config" CONFIG_VIRTIO
   require_builtin_or_module "$config" CONFIG_VIRTIO_PCI
   require_builtin_or_module "$config" CONFIG_VIRTIO_NET
