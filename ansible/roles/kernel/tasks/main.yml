@@ -1,10 +1,288 @@
 ---
-- name: Report kernel RPM handling when no URL is provided
-  ansible.builtin.debug:
-    msg: "KERNEL_RPM_URL is not set; keeping template kernel for v1."
-  when: lookup('ansible.builtin.env', 'KERNEL_RPM_URL') | length == 0
+- name: Determine staged kernel RPMs on runner
+  ansible.builtin.find:
+    paths: "{{ playbook_dir }}/../artifacts/kernel-rpms"
+    patterns: "*.rpm"
+  delegate_to: localhost
+  become: false
+  run_once: true
+  register: staged_kernel_rpms
 
-- name: Kernel RPM install placeholder
+- name: Record custom kernel source
+  ansible.builtin.set_fact:
+    kernel_source: "{{ lookup('ansible.builtin.env', 'KERNEL_SOURCE') | default('none', true) }}"
+    kernel_expected_release: "{{ lookup('ansible.builtin.env', 'KERNEL_EXPECTED_RELEASE') | default('', true) }}"
+
+- name: Report template kernel path
   ansible.builtin.debug:
-    msg: "KERNEL_RPM_URL is set, but automated kernel RPM installation is intentionally a v1 stub."
-  when: lookup('ansible.builtin.env', 'KERNEL_RPM_URL') | length > 0
+    msg: "KERNEL_SOURCE=none; keeping template kernel."
+  when: kernel_source == 'none'
+
+- name: Fail if custom kernel requested but no RPMs were staged
+  ansible.builtin.fail:
+    msg: "Custom kernel requested with KERNEL_SOURCE={{ kernel_source }}, but artifacts/kernel-rpms contains no RPMs."
+  when:
+    - kernel_source != 'none'
+    - staged_kernel_rpms.matched | int == 0
+
+- name: Create kernel RPM staging directory
+  ansible.builtin.file:
+    path: /tmp/pulsaros-kernel-rpms
+    state: directory
+    mode: "0755"
+  when: kernel_source != 'none'
+
+- name: Copy kernel RPMs to VM
+  ansible.builtin.copy:
+    src: "{{ item.path }}"
+    dest: "/tmp/pulsaros-kernel-rpms/{{ item.path | basename }}"
+    mode: "0644"
+  loop: "{{ staged_kernel_rpms.files }}"
+  when: kernel_source != 'none'
+
+- name: Capture current kernel release
+  ansible.builtin.command: uname -r
+  register: kernel_before
+  changed_when: false
+
+- name: Capture current working boot arguments
+  ansible.builtin.shell: |
+    set -euo pipefail
+    args="$(tr ' ' '\n' < /proc/cmdline \
+      | grep -v '^BOOT_IMAGE=' \
+      | paste -sd ' ' -)"
+    if ! grep -Eq '(^| )root=' <<<"$args"; then
+      echo "Current kernel command line is missing root=: $args" >&2
+      exit 1
+    fi
+    printf '%s\n' "$args"
+  args:
+    executable: /bin/bash
+  register: kernel_working_args
+  changed_when: false
+  when: kernel_source != 'none'
+
+- name: Capture current root filesystem type
+  ansible.builtin.command: findmnt -n -o FSTYPE /
+  register: kernel_root_fstype
+  changed_when: false
+  when: kernel_source != 'none'
+
+- name: Install custom kernel RPMs
+  ansible.builtin.shell: |
+    set -euo pipefail
+    dnf install -y /tmp/pulsaros-kernel-rpms/*.rpm
+  args:
+    executable: /bin/bash
+  when: kernel_source != 'none'
+
+- name: Select latest PulsarOS kernel as default
+  ansible.builtin.shell:
+    cmd: |
+      set -euo pipefail
+      latest="$(find /boot -maxdepth 1 -name 'vmlinuz-*pulsaros*' -printf '%f\n' | sed 's/^vmlinuz-//' | sort -V | tail -n1)"
+      if [ -z "$latest" ]; then
+        echo "No /boot/vmlinuz-*pulsaros* kernel found after RPM install" >&2
+        exit 1
+      fi
+      kernel="/boot/vmlinuz-${latest}"
+      initrd="/boot/initramfs-${latest}.img"
+      working_args="${KERNEL_WORKING_ARGS}"
+      root_fstype="${KERNEL_ROOT_FSTYPE}"
+      extra_args="hugepagesz=2M default_hugepagesz=2M rootwait console=tty0 console=ttyS0,115200n8 earlyprintk=serial,ttyS0,115200 ignore_loglevel loglevel=7"
+      # The kernel RPM may add rootfstype=ext4 unconditionally. Reuse the
+      # template kernel's known-good root args so Fedora btrfs/xfs templates boot.
+      grubby --remove-kernel "$kernel" || true
+      grubby --add-kernel "$kernel" \
+        --initrd "$initrd" \
+        --title "PulsarOS Kernel ${latest}" \
+        --args "$working_args $extra_args"
+      grubby --set-default "$kernel"
+      grubby --info "$kernel" > /tmp/pulsaros-custom-kernel-grubby-info
+      cat /tmp/pulsaros-custom-kernel-grubby-info
+      bls_id="$(awk -F= '/^id=/{gsub(/"/, "", $2); print $2; exit}' /tmp/pulsaros-custom-kernel-grubby-info)"
+      bls_entry="/boot/loader/entries/${bls_id}.conf"
+      if [ ! -f "$bls_entry" ]; then
+        echo "Custom kernel BLS entry not found: $bls_entry" >&2
+        exit 1
+      fi
+      # Fedora grubby may split root= into a synthetic root="..." field in
+      # grubby --info. Patch the BLS options line directly so the booted kernel
+      # receives the same known-good root args as the template kernel.
+      bls_options="$working_args $extra_args"
+      tmp="$(mktemp)"
+      awk -v options="$bls_options" '
+        BEGIN { wrote = 0 }
+        /^options[[:space:]]/ {
+          print "options " options
+          wrote = 1
+          next
+        }
+        { print }
+        END {
+          if (!wrote) {
+            print "options " options
+          }
+        }
+      ' "$bls_entry" > "$tmp"
+      cat "$tmp" > "$bls_entry"
+      rm -f "$tmp"
+      echo "Patched BLS entry $bls_entry"
+      cat "$bls_entry"
+      if ! grep -Eq '^(args=.*(^|[[:space:]"])root=|root="/)' /tmp/pulsaros-custom-kernel-grubby-info; then
+        echo "Custom kernel grubby entry is missing root= after update:" >&2
+        cat /tmp/pulsaros-custom-kernel-grubby-info >&2
+        exit 1
+      fi
+      if ! grep -Eq '^options .* root=|^options root=' "$bls_entry"; then
+        echo "Custom kernel BLS options are missing root= after patch:" >&2
+        cat "$bls_entry" >&2
+        exit 1
+      fi
+      echo "Selected $latest with root filesystem ${root_fstype}"
+      echo "$latest" > /tmp/pulsaros-expected-kernel-release
+  args:
+    executable: /bin/bash
+  environment:
+    KERNEL_WORKING_ARGS: "{{ kernel_working_args.stdout }}"
+    KERNEL_ROOT_FSTYPE: "{{ kernel_root_fstype.stdout }}"
+  when: kernel_source != 'none'
+
+- name: Validate custom kernel boot support before reboot
+  ansible.builtin.shell:
+    cmd: |
+      set -euo pipefail
+      expected="$(cat /tmp/pulsaros-expected-kernel-release)"
+      config="/boot/config-${expected}"
+      initramfs="/boot/initramfs-${expected}.img"
+      root_fstype="${KERNEL_ROOT_FSTYPE}"
+
+      if [ ! -f "$config" ]; then
+        echo "Missing $config; cannot validate custom kernel config" >&2
+        exit 1
+      fi
+      if [ ! -f "$initramfs" ]; then
+        echo "Missing $initramfs; cannot validate custom kernel initramfs" >&2
+        exit 1
+      fi
+
+      require_builtin_or_module() {
+        local symbol="$1"
+        if ! grep -Eq "^${symbol}=(y|m)$" "$config"; then
+          echo "Missing required kernel option ${symbol}=y/m in $config" >&2
+          exit 1
+        fi
+      }
+
+      require_builtin() {
+        local symbol="$1"
+        if ! grep -q "^${symbol}=y$" "$config"; then
+          echo "Missing required built-in kernel option ${symbol}=y in $config" >&2
+          exit 1
+        fi
+      }
+
+      require_config_string() {
+        local symbol="$1"
+        local expected="$2"
+        if ! grep -q "^${symbol}=\"${expected}\"$" "$config"; then
+          echo "Missing required kernel option ${symbol}=\"${expected}\" in $config" >&2
+          exit 1
+        fi
+      }
+
+      require_config_string CONFIG_LOCALVERSION "-pulsaros"
+      require_builtin_or_module CONFIG_BLK_DEV_INITRD
+      require_builtin_or_module CONFIG_DEVTMPFS
+      require_builtin CONFIG_MD
+      require_builtin CONFIG_BLK_DEV_DM
+      require_builtin_or_module CONFIG_CGROUPS
+      require_builtin_or_module CONFIG_CGROUP_SCHED
+      require_builtin_or_module CONFIG_MEMCG
+      require_builtin_or_module CONFIG_TMPFS
+      require_builtin_or_module CONFIG_UNIX98_PTYS
+      require_builtin_or_module CONFIG_NET
+      require_builtin_or_module CONFIG_INET
+      require_builtin_or_module CONFIG_NETDEVICES
+      require_builtin CONFIG_LLC
+      require_builtin CONFIG_STP
+      require_builtin CONFIG_BRIDGE
+      require_builtin CONFIG_BRIDGE_VLAN_FILTERING
+      require_builtin CONFIG_VLAN_8021Q
+      require_builtin CONFIG_VXLAN
+      require_builtin_or_module CONFIG_VIRTIO
+      require_builtin_or_module CONFIG_VIRTIO_PCI
+      require_builtin_or_module CONFIG_VIRTIO_NET
+      require_builtin_or_module CONFIG_SERIAL_8250
+      require_builtin_or_module CONFIG_SERIAL_8250_CONSOLE
+
+      case "$root_fstype" in
+        xfs) require_builtin_or_module CONFIG_XFS_FS ;;
+        btrfs) require_builtin_or_module CONFIG_BTRFS_FS ;;
+        ext4) require_builtin_or_module CONFIG_EXT4_FS ;;
+        *)
+          echo "Unsupported template root filesystem for custom kernel validation: ${root_fstype}" >&2
+          exit 1
+          ;;
+      esac
+
+      if grep -q '^CONFIG_SCSI_VIRTIO=y$' "$config"; then
+        :
+      elif grep -q '^CONFIG_SCSI_VIRTIO=m$' "$config"; then
+        initramfs_contents="$(lsinitrd "$initramfs")"
+        grep -q 'virtio_scsi' <<<"$initramfs_contents" || {
+          echo "CONFIG_SCSI_VIRTIO=m but virtio_scsi is missing from $initramfs" >&2
+          exit 1
+        }
+      else
+        echo "Missing CONFIG_SCSI_VIRTIO=y/m for Proxmox virtio-scsi boot" >&2
+        exit 1
+      fi
+
+      if grep -Eq '(^| )rd\.lvm\.lv=|(^| )root=/dev/(mapper|dm-)' <<<"${KERNEL_WORKING_ARGS}"; then
+        initramfs_contents="$(lsinitrd "$initramfs")"
+        grep -Eq '(^|/)(lvm|lvm_scan|dmsetup)( |$)' <<<"$initramfs_contents" || {
+          echo "Template boot args require LVM, but LVM support is missing from $initramfs" >&2
+          exit 1
+        }
+      fi
+
+      echo "Custom kernel $expected has boot support for root filesystem $root_fstype"
+  args:
+    executable: /bin/bash
+  environment:
+    KERNEL_ROOT_FSTYPE: "{{ kernel_root_fstype.stdout }}"
+    KERNEL_WORKING_ARGS: "{{ kernel_working_args.stdout }}"
+  when: kernel_source != 'none'
+
+- name: Trigger reboot into custom kernel
+  ansible.builtin.shell: |
+    set -euo pipefail
+    sleep 2
+    systemctl reboot
+  args:
+    executable: /bin/bash
+  async: 1
+  poll: 0
+  changed_when: true
+  when: kernel_source != 'none'
+
+- name: Wait for custom kernel SSH
+  ansible.builtin.wait_for_connection:
+    delay: 10
+    timeout: 240
+  when: kernel_source != 'none'
+
+- name: Capture booted kernel release
+  ansible.builtin.command: uname -r
+  register: kernel_after
+  changed_when: false
+
+- name: Verify custom kernel release marker
+  ansible.builtin.assert:
+    that:
+      - kernel_after.stdout is search(kernel_expected_release)
+      - kernel_after.stdout != kernel_before.stdout
+    fail_msg: "Expected custom kernel containing '{{ kernel_expected_release }}' and different from '{{ kernel_before.stdout }}', got '{{ kernel_after.stdout }}'."
+    success_msg: "Booted custom kernel {{ kernel_after.stdout }}."
+  when: kernel_source != 'none'

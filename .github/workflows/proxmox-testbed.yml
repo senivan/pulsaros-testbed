@@ -29,16 +29,146 @@ on:
         description: "VLAN-aware test bridge"
         required: true
         default: "vmbr-test"
+      kernel_source:
+        description: "Custom kernel source"
+        required: true
+        default: "none"
+        type: choice
+        options:
+          - none
+          - pulsaros-kernel-git
+          - rpm-url
+      kernel_repo:
+        description: "PulsarOS kernel git repository"
+        required: true
+        default: "https://github.com/senivan/PulsarOS-kernel.git"
+      kernel_ref:
+        description: "PulsarOS kernel git ref"
+        required: true
+        default: "main"
+      kernel_version:
+        description: "Upstream Linux kernel version to build"
+        required: true
+        default: "6.16"
       kernel_rpm_url:
-        description: "Optional PulsarOS kernel RPM URL"
+        description: "Optional direct kernel RPM URL when kernel_source=rpm-url"
         required: false
+      keep_vms_on_failure:
+        description: "Leave generated VMs running when the testbed job fails"
+        required: true
+        default: false
+        type: boolean
 
 concurrency:
   group: proxmox-pulsaros-testbed
   cancel-in-progress: false
 
 jobs:
+  build-kernel:
+    if: ${{ inputs.kernel_source == 'pulsaros-kernel-git' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    env:
+      KERNEL_REPO: ${{ inputs.kernel_repo }}
+      KERNEL_REF: ${{ inputs.kernel_ref }}
+      KVER: ${{ inputs.kernel_version }}
+      INSTALL_RPMS: "0"
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_BASEDIR: ${{ github.workspace }}
+      CCACHE_COMPILERCHECK: content
+      CCACHE_MAXSIZE: 2G
+      CCACHE_NOHASHDIR: "true"
+      RPMBUILD_TOPDIR: ${{ github.workspace }}/rpmbuild
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install kernel build dependencies
+        run: |
+          sudo apt-get update
+          sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            rpm build-essential bc bison ccache flex dracut git \
+            libelf-dev libncurses-dev libssl-dev dwarves
+
+      - name: Restore ccache
+        id: ccache-restore
+        uses: actions/cache/restore@v4
+        with:
+          path: .ccache
+          key: pulsaros-kernel-ccache-${{ runner.os }}-${{ inputs.kernel_version }}-${{ inputs.kernel_ref }}-${{ github.run_id }}
+          restore-keys: |
+            pulsaros-kernel-ccache-${{ runner.os }}-${{ inputs.kernel_version }}-${{ inputs.kernel_ref }}-
+            pulsaros-kernel-ccache-${{ runner.os }}-${{ inputs.kernel_version }}-
+            pulsaros-kernel-ccache-${{ runner.os }}-
+
+      - name: Configure ccache
+        run: |
+          mkdir -p "$CCACHE_DIR"
+          ccache --set-config=max_size="$CCACHE_MAXSIZE"
+          ccache --set-config=compiler_check="$CCACHE_COMPILERCHECK"
+          ccache -z
+          ccache -s
+
+      - name: Restore kernel tarball cache
+        uses: actions/cache@v4
+        with:
+          path: kernel-src
+          key: pulsaros-kernel-src-${{ inputs.kernel_version }}
+
+      - name: Clone PulsarOS kernel repository
+        run: |
+          mkdir -p kernel-src
+          rm -rf kernel-src/repo
+          git clone "$KERNEL_REPO" kernel-src/repo
+          cd kernel-src/repo
+          git checkout "$KERNEL_REF"
+
+      - name: Build PulsarOS kernel RPMs
+        working-directory: kernel-src/repo
+        run: |
+          export PATH="/usr/lib/ccache:$PATH"
+          if [ -f "../kernel-${KVER}.tar.xz" ]; then
+            cp "../kernel-${KVER}.tar.xz" .
+          fi
+          if [ -f "kernel-${KVER}.tar.xz" ]; then
+            echo "Using cached kernel-${KVER}.tar.xz"
+          else
+            scripts/fetch-upstream.sh "$KVER"
+          fi
+          cp "kernel-${KVER}.tar.xz" ..
+          scripts/update-spec.sh "$KVER"
+          INSTALL_RPMS=0 scripts/build-rpm.sh
+          ccache -s
+
+      - name: Collect kernel RPMs
+        run: |
+          mkdir -p artifacts/kernel-rpms
+          cp "$RPMBUILD_TOPDIR"/RPMS/*/kernel-*.rpm artifacts/kernel-rpms/
+          rpm -qp --queryformat '%{NAME} %{VERSION}-%{RELEASE} %{ARCH}\n' artifacts/kernel-rpms/*.rpm \
+            > artifacts/kernel-rpms/kernel-rpms.txt
+
+      - name: Validate kernel RPM boot support
+        run: ./scripts/validate-kernel-rpm.sh artifacts/kernel-rpms
+
+      - name: Upload kernel RPM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pulsaros-kernel-rpms-${{ github.run_id }}
+          path: artifacts/kernel-rpms/
+          if-no-files-found: error
+
+      - name: Save ccache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .ccache
+          key: ${{ steps.ccache-restore.outputs.cache-primary-key }}
+
   testbed:
+    needs: build-kernel
+    if: ${{ always() && (inputs.kernel_source != 'pulsaros-kernel-git' || needs.build-kernel.result == 'success') }}
     runs-on: self-hosted
     timeout-minutes: 90
 
@@ -49,11 +179,32 @@ jobs:
       STORAGE: ${{ inputs.storage }}
       MGMT_BRIDGE: ${{ inputs.mgmt_bridge }}
       TEST_BRIDGE: ${{ inputs.test_bridge }}
+      KERNEL_SOURCE: ${{ inputs.kernel_source }}
       KERNEL_RPM_URL: ${{ inputs.kernel_rpm_url }}
+      KERNEL_EXPECTED_RELEASE: ${{ inputs.kernel_source != 'none' && 'pulsaros' || '' }}
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Validate kernel inputs
+        if: ${{ inputs.kernel_source == 'rpm-url' && inputs.kernel_rpm_url == '' }}
+        run: |
+          echo "kernel_source=rpm-url requires kernel_rpm_url"
+          exit 1
+
+      - name: Download built kernel RPMs
+        if: ${{ inputs.kernel_source == 'pulsaros-kernel-git' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: pulsaros-kernel-rpms-${{ github.run_id }}
+          path: artifacts/kernel-rpms
+
+      - name: Download direct kernel RPM
+        if: ${{ inputs.kernel_source == 'rpm-url' && inputs.kernel_rpm_url != '' }}
+        run: |
+          mkdir -p artifacts/kernel-rpms
+          curl -fL "$KERNEL_RPM_URL" -o artifacts/kernel-rpms/kernel-custom.rpm
 
       - name: Proxmox preflight
         run: ./scripts/pve-preflight.sh
@@ -78,7 +229,7 @@ jobs:
         run: ./scripts/pve-collect-logs.sh "$RUN_ID"
 
       - name: Destroy testbed
-        if: always()
+        if: ${{ always() && (!failure() || !inputs.keep_vms_on_failure) }}
         run: ./scripts/pve-destroy-run.sh "$RUN_ID"
 
       - name: Upload artifacts
@@ -109,6 +260,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Download testbed artifacts
+        continue-on-error: true
         uses: actions/download-artifact@v4
         with:
           name: pulsaros-proxmox-testbed-${{ github.run_id }}

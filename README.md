@@ -107,6 +107,47 @@ linux-vxlan-reference
 
 The workflow always attempts log collection, VM destruction, and artifact upload.
 
+## Custom Kernel Runs
+
+The workflow can build PulsarOS kernel RPMs on a GitHub-hosted runner, then install them into the disposable Proxmox VMs before running tests.
+
+Use:
+
+```text
+kernel_source=pulsaros-kernel-git
+kernel_repo=https://github.com/senivan/PulsarOS-kernel.git
+kernel_ref=main
+kernel_version=6.16
+```
+
+Flow:
+
+```text
+ubuntu-latest builds RPMs from PulsarOS-kernel
+self-hosted Proxmox runner downloads RPM artifact
+Ansible copies RPMs to all VMs
+VMs install RPMs, rewrite the PulsarOS kernel boot entry with the template kernel's known-good root arguments, reboot, and verify uname -r
+scenario tests run against the custom kernel
+```
+
+For a direct RPM test, use `kernel_source=rpm-url` and provide `kernel_rpm_url`. For manual local runs, place RPMs in `artifacts/kernel-rpms/` and export:
+
+```bash
+export KERNEL_SOURCE=pulsaros-kernel-git
+export KERNEL_EXPECTED_RELEASE=pulsaros
+make provision
+```
+
+The testbed intentionally overrides root-related boot arguments on the installed PulsarOS kernel. This avoids inheriting package defaults like `rootfstype=ext4` when the Fedora template actually boots from another filesystem such as btrfs or xfs.
+
+For kernel boot debugging, set:
+
+```text
+keep_vms_on_failure=true
+```
+
+When a custom kernel panics or SSH never returns, the workflow will collect what it can and leave the generated VMs available for Proxmox console inspection. Clean them up manually with `RUN_ID=<run-id> make destroy` after debugging.
+
 ## Triggering From Another Repository Later
 
 Use a private repository and trigger this workflow with `workflow_dispatch` through the GitHub API or `gh workflow run`. Do not expose Proxmox-backed runners to untrusted pull requests.

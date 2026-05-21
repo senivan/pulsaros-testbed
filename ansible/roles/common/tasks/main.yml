@@ -10,4 +10,5 @@
       - rsync
       - curl
       - git
+      - grubby
     state: present
