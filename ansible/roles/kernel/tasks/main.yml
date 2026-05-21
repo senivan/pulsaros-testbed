@@ -100,7 +100,7 @@
       grubby --set-default "$kernel"
       grubby --info "$kernel" > /tmp/pulsaros-custom-kernel-grubby-info
       cat /tmp/pulsaros-custom-kernel-grubby-info
-      if ! grep -Eq '^args=.*(^|[[:space:]"])root=' /tmp/pulsaros-custom-kernel-grubby-info; then
+      if ! grep -Eq '^(args=.*(^|[[:space:]"])root=|root="/)' /tmp/pulsaros-custom-kernel-grubby-info; then
         echo "Custom kernel grubby entry is missing root= after update:" >&2
         cat /tmp/pulsaros-custom-kernel-grubby-info >&2
         exit 1
