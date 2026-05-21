@@ -17,6 +17,9 @@ run_pve() {
 need_env TEMPLATE_ID
 need_env STORAGE
 need_env MGMT_BRIDGE
+TOPOLOGY="${TOPOLOGY:-linux-vxlan-reference}"
+TOPOLOGY_FILE="${TOPOLOGY_FILE:-topologies/${TOPOLOGY}.yml}"
+[[ -f "$TOPOLOGY_FILE" ]] || die "topology file not found: $TOPOLOGY_FILE"
 NETWORK_MODE="${NETWORK_MODE:-qinq}"
 case "$NETWORK_MODE" in
   qinq|bridge) ;;
