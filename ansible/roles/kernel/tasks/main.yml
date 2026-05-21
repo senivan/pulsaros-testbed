@@ -81,16 +81,23 @@
         exit 1
       fi
       kernel="/boot/vmlinuz-${latest}"
+      initrd="/boot/initramfs-${latest}.img"
       working_args="${KERNEL_WORKING_ARGS}"
       root_fstype="${KERNEL_ROOT_FSTYPE}"
       extra_args="hugepagesz=2M default_hugepagesz=2M rootwait console=tty0 console=ttyS0,115200n8 earlyprintk=serial,ttyS0,115200 ignore_loglevel loglevel=7"
       # The kernel RPM may add rootfstype=ext4 unconditionally. Reuse the
       # template kernel's known-good root args so Fedora btrfs/xfs templates boot.
-      grubby --update-kernel "$kernel" \
-        --remove-args "root rootfstype rootflags ro rw resume rd.luks.uuid rd.lvm.lv rd.md.uuid rd.dm.uuid"
-      grubby --update-kernel "$kernel" \
+      grubby --remove-kernel "$kernel" || true
+      grubby --add-kernel "$kernel" \
+        --initrd "$initrd" \
+        --title "PulsarOS Kernel ${latest}" \
         --args "$working_args $extra_args"
       grubby --set-default "$kernel"
+      grubby --info "$kernel"
+      if ! grubby --info "$kernel" | grep -q 'root='; then
+        echo "Custom kernel grubby entry is missing root= after update" >&2
+        exit 1
+      fi
       echo "Selected $latest with root filesystem ${root_fstype}"
       echo "$latest" > /tmp/pulsaros-expected-kernel-release
   args:
