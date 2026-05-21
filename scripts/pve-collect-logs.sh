@@ -41,10 +41,22 @@ collect_cmd() {
 }
 
 collect_pve_cmd() {
-  local host="$1" vmid="$2" suffix="$3" cmd="$4"
+  local host="$1" vmid="$2" suffix="$3"
+  shift 3
   [[ -n "$vmid" ]] || return 0
   log "Collecting Proxmox $suffix from $host"
-  run_pve bash -c "$cmd" > "logs/${host}-${suffix}.log" 2>&1 || warn "failed to collect Proxmox $suffix from $host"
+  run_pve "$@" > "logs/${host}-${suffix}.log" 2>&1 || warn "failed to collect Proxmox $suffix from $host"
+}
+
+collect_pve_serial() {
+  local host="$1" vmid="$2"
+  [[ -n "$vmid" ]] || return 0
+  log "Collecting Proxmox serial console from $host"
+  if (( EUID == 0 )); then
+    timeout 8 qm terminal "$vmid" > "logs/${host}-serial-console.log" 2>&1 || warn "failed to collect Proxmox serial console from $host"
+  else
+    timeout 8 sudo -n qm terminal "$vmid" > "logs/${host}-serial-console.log" 2>&1 || warn "failed to collect Proxmox serial console from $host"
+  fi
 }
 
 copy_pcap() {
@@ -63,9 +75,9 @@ for entry in \
   rest="${entry#*:}"
   ip="${rest%%:*}"
   vmid="${rest#*:}"
-  collect_pve_cmd "$host" "$vmid" qm-status "qm status '$vmid' --verbose"
-  collect_pve_cmd "$host" "$vmid" qm-config "qm config '$vmid'"
-  collect_pve_cmd "$host" "$vmid" serial-console "timeout 8 qm terminal '$vmid' </dev/null"
+  collect_pve_cmd "$host" "$vmid" qm-status qm status "$vmid" --verbose
+  collect_pve_cmd "$host" "$vmid" qm-config qm config "$vmid"
+  collect_pve_serial "$host" "$vmid"
   collect_cmd "$host" "$ip" dmesg "sudo dmesg || dmesg"
   collect_cmd "$host" "$ip" journal "sudo journalctl -b --no-pager || journalctl -b --no-pager"
   collect_cmd "$host" "$ip" ip-link "ip link"
