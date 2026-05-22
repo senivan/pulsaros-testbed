@@ -57,7 +57,12 @@
 
     cd "${source_dir}"
     rm -rf builddir
-    meson setup builddir -Denable_lua=true -Denable_docs=false -Dwerror=false
+    meson setup builddir \
+      -Denable_lua=true \
+      -Denable_docs=false \
+      -Denable-avx=false \
+      -Denable-avx2=false \
+      -Dwerror=false
     meson compile -C builddir
 
     install -D -m 0755 builddir/app/pktgen /usr/local/libexec/pulsaros/pktgen-dpdk/pktgen
