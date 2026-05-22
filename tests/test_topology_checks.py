@@ -1,3 +1,4 @@
+import json
 import pathlib
 import re
 import shlex
@@ -6,7 +7,28 @@ import time
 
 import pytest
 
-from conftest import PCAPS, host_ip, host_nic, iface_by_mac, resolved_topology, scp_from, ssh
+from conftest import PCAPS, TOPOLOGY_JSON, host_ip, host_nic, iface_by_mac, scp_from, ssh
+
+
+def _load_checks_for_collection():
+    if not TOPOLOGY_JSON.exists():
+        return []
+    data = json.loads(TOPOLOGY_JSON.read_text(encoding="utf-8"))
+    return data.get("checks", [])
+
+
+def pytest_generate_tests(metafunc):
+    if "topology_check" not in metafunc.fixturenames:
+        return
+    checks = _load_checks_for_collection()
+    if checks:
+        metafunc.parametrize(
+            "topology_check",
+            checks,
+            ids=[check.get("name", f"check-{index}") for index, check in enumerate(checks)],
+        )
+    else:
+        metafunc.parametrize("topology_check", [None], ids=["no-topology-checks"])
 
 
 def _check_value(check, name, default):
@@ -120,15 +142,13 @@ def _run_packet_capture_check(topology, ssh_user, ssh_key, check):
         _collect_capture(topology, ssh_user, ssh_key, capture)
 
 
-def test_topology_checks(topology, ssh_user, ssh_key):
-    checks = resolved_topology(topology).get("checks", [])
-    if not checks:
+def test_topology_check(topology, ssh_user, ssh_key, topology_check):
+    if topology_check is None:
         pytest.skip("topology declares no checks")
 
-    for check in checks:
-        if check["type"] == "ping":
-            _run_ping_check(topology, ssh_user, ssh_key, check)
-        elif check["type"] == "packet_capture":
-            _run_packet_capture_check(topology, ssh_user, ssh_key, check)
-        else:
-            pytest.fail(f"unsupported topology check type: {check['type']}")
+    if topology_check["type"] == "ping":
+        _run_ping_check(topology, ssh_user, ssh_key, topology_check)
+    elif topology_check["type"] == "packet_capture":
+        _run_packet_capture_check(topology, ssh_user, ssh_key, topology_check)
+    else:
+        pytest.fail(f"unsupported topology check type: {topology_check['type']}")
