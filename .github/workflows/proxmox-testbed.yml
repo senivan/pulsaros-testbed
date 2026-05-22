@@ -6,12 +6,12 @@ on:
       scenario:
         description: "Scenario to run"
         required: true
-        default: "linux-vxlan-reference"
+        default: "topology-checks"
         type: choice
         options:
           - kernel-smoke
           - dpdk-smoke
-          - linux-vxlan-reference
+          - topology-checks
           - full
       topology:
         description: "Topology YAML name from topologies/"

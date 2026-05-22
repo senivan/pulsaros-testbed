@@ -84,7 +84,7 @@ make create
 make wait-ssh
 make inventory
 make provision
-make scenario SCENARIO=linux-vxlan-reference
+make scenario SCENARIO=topology-checks
 make logs
 make destroy
 ```
@@ -149,7 +149,7 @@ Default useful inputs:
 
 ```text
 topology=linux-vxlan-reference
-scenario=linux-vxlan-reference
+scenario=topology-checks
 network_mode=qinq
 sdn_bridge=vmbr-test
 kernel_source=none

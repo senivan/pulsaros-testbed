@@ -23,13 +23,13 @@ case "$SCENARIO" in
   dpdk-smoke)
     run_pytest dpdk-smoke tests/test_hugepages.py tests/test_dpdk.py
     ;;
-  linux-vxlan-reference)
-    run_pytest linux-vxlan-reference tests/test_kernel.py tests/test_topology_checks.py
+  topology-checks|linux-vxlan-reference)
+    run_pytest topology-checks tests/test_kernel.py tests/test_topology_checks.py
     ;;
   full)
     run_pytest kernel-smoke tests/test_kernel.py
     run_pytest dpdk-smoke tests/test_hugepages.py tests/test_dpdk.py
-    run_pytest linux-vxlan-reference tests/test_topology_checks.py
+    run_pytest topology-checks tests/test_topology_checks.py
     ;;
   *)
     die "unsupported scenario: $SCENARIO"
