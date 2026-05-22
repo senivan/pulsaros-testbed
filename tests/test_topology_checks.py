@@ -161,7 +161,7 @@ def _run_pktgen_dpdk_check(topology, ssh_user, ssh_key, check):
     script_path = f"{remote_dir}/{check['name']}.lua"
     log_path = f"{remote_dir}/{check['name']}.log"
     lua = f"""
-package.path = package.path ..";?.lua;test/?.lua;app/?.lua;"
+package.path = package.path ..";/usr/local/share/pulsaros-pktgen/?.lua;?.lua;test/?.lua;app/?.lua;"
 require "Pktgen"
 pktgen.screen("off")
 pktgen.set("all", "count", {packet_count})

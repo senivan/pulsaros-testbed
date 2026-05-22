@@ -1,8 +1,27 @@
 ---
+- name: Install pktgen-dpdk prerequisites
+  ansible.builtin.shell: |
+    set -euo pipefail
+    dnf install -y \
+      dpdk \
+      dpdk-devel \
+      gcc \
+      git \
+      libbsd-devel \
+      libpcap-devel \
+      lua-devel \
+      make \
+      meson \
+      ninja-build \
+      numactl-devel \
+      pkgconf-pkg-config
+  args:
+    executable: /bin/bash
+  changed_when: false
+
 - name: Try to install pktgen-dpdk package
   ansible.builtin.shell: |
     set -euo pipefail
-    dnf install -y dpdk || true
     dnf install -y pktgen-dpdk || dnf install -y pktgen || true
   args:
     executable: /bin/bash
@@ -20,7 +39,36 @@
   changed_when: false
   failed_when: false
 
-- name: Warn if pktgen-dpdk is unavailable
-  ansible.builtin.debug:
-    msg: "pktgen-dpdk/pktgen is unavailable; topology pktgen_dpdk checks will fail if declared."
+- name: Build pktgen-dpdk from source when no package binary exists
+  ansible.builtin.shell: |
+    set -euo pipefail
+    prefix=/opt/pulsaros/pktgen-dpdk
+    source_dir="${prefix}/source"
+    ref="${PKTGEN_DPDK_REF:-pktgen-24.10.3}"
+
+    mkdir -p "${prefix}"
+    if [ ! -d "${source_dir}/.git" ]; then
+      rm -rf "${source_dir}"
+      git clone --depth 1 --branch "${ref}" https://github.com/pktgen/Pktgen-DPDK.git "${source_dir}"
+    else
+      git -C "${source_dir}" fetch --depth 1 origin "${ref}"
+      git -C "${source_dir}" checkout --force FETCH_HEAD
+    fi
+
+    cd "${source_dir}"
+    rm -rf builddir
+    meson setup builddir -Denable_lua=true -Denable_docs=false -Dwerror=false
+    meson compile -C builddir
+
+    install -D -m 0755 builddir/app/pktgen /usr/local/libexec/pulsaros/pktgen-dpdk/pktgen
+    install -D -m 0644 Pktgen.lua /usr/local/share/pulsaros-pktgen/Pktgen.lua
+    ln -sfn /usr/local/libexec/pulsaros/pktgen-dpdk/pktgen /usr/local/bin/pktgen-dpdk
+    ldconfig
+  args:
+    executable: /bin/bash
+  changed_when: true
   when: pktgen_dpdk.rc != 0 and pktgen.rc != 0
+
+- name: Verify pktgen-dpdk is available
+  ansible.builtin.shell: command -v pktgen-dpdk || command -v pktgen
+  changed_when: false
