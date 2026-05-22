@@ -155,6 +155,7 @@ for entry in "${host_entries[@]}"; do
   collect_cmd "$host" "$ip" uname "uname -a"
   collect_cmd "$host" "$ip" kernel-rpms "rpm -qa 'kernel*' | sort || true"
   collect_cmd "$host" "$ip" kernel-boot "sudo grubby --info=DEFAULT || true; findmnt / || true; cat /proc/cmdline || true"
+  collect_cmd "$host" "$ip" testbed-tmp "sudo sh -c 'ls -la /tmp/pulsaros-testbed 2>/dev/null || true; for f in /tmp/pulsaros-testbed/*.log; do [ -f \"\$f\" ] || continue; echo === \"\$f\"; cat \"\$f\"; done'"
 done
 
 if [[ -n "${VTEP_A_IP:-}" ]]; then

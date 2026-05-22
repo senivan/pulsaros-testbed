@@ -41,7 +41,8 @@ networks, hosts, NICs, Ansible host variables, generated playbook roles, and
 scenario acceptance checks. Compatibility aliases are still rendered for older
 scripts, but topology-specific pytest assertions should consume the resolved
 JSON and the topology-declared `checks:` section instead of hard-coding host
-names.
+names. The generic topology check runner supports ping checks, tcpdump-backed
+packet capture checks, and client-side `pktgen_dpdk` traffic generation checks.
 
 The GitHub runner does not host the test workload. It only calls Proxmox tools,
 runs Ansible over SSH, invokes pytest, and uploads artifacts.

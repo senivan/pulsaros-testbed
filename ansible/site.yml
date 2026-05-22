@@ -13,6 +13,13 @@
     - hugepages
     - dpdk
 
+- name: Provision client traffic generator prerequisites
+  hosts: clients
+  become: true
+  roles:
+    - hugepages
+    - traffic-tools
+
 - name: Configure Linux VXLAN reference topology
   hosts: all
   become: true

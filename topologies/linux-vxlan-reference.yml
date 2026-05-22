@@ -113,6 +113,12 @@ plays:
     roles:
       - hugepages
       - dpdk
+  - name: Provision client traffic generator prerequisites
+    hosts: clients
+    become: true
+    roles:
+      - hugepages
+      - traffic-tools
   - name: Configure Linux VXLAN reference topology
     hosts: all
     become: true
@@ -144,6 +150,19 @@ checks:
       count: 5
       wait: 2
       timeout: 40
+
+  - name: pktgen-client-a-to-b
+    type: pktgen_dpdk
+    source: client-a
+    nic: left
+    destination_mac: "@host:client-b.nic:right.mac"
+    source_ip: 10.10.0.1/24
+    destination_ip: 10.10.0.2
+    protocol: udp
+    packet_size: 128
+    rate_percent: 1
+    duration: 5
+    timeout: 30
 
 compat:
   CLIENT_A: "@host:client-a.vmid"

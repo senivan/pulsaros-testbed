@@ -142,6 +142,68 @@ def _run_packet_capture_check(topology, ssh_user, ssh_key, check):
         _collect_capture(topology, ssh_user, ssh_key, capture)
 
 
+def _lua_string(value):
+    return json.dumps(str(value))
+
+
+def _run_pktgen_dpdk_check(topology, ssh_user, ssh_key, check):
+    nic = host_nic(topology, check["source"], check["nic"])
+    source_if = iface_by_mac(topology, ssh_user, ssh_key, check["source"], nic["mac"])
+    duration_ms = _check_value(check, "duration", 5) * 1000
+    timeout = _check_value(check, "timeout", 30)
+    packet_count = _check_value(check, "count", 0)
+    packet_size = _check_value(check, "packet_size", 128)
+    rate_percent = _check_value(check, "rate_percent", 1)
+    sport = _check_value(check, "source_port", 1234)
+    dport = _check_value(check, "destination_port", 5678)
+    protocol = check.get("protocol", "udp")
+    remote_dir = "/tmp/pulsaros-testbed"
+    script_path = f"{remote_dir}/{check['name']}.lua"
+    log_path = f"{remote_dir}/{check['name']}.log"
+    lua = f"""
+package.path = package.path ..";?.lua;test/?.lua;app/?.lua;"
+require "Pktgen"
+pktgen.screen("off")
+pktgen.set("all", "count", {packet_count})
+pktgen.set("all", "rate", {rate_percent})
+pktgen.set("all", "size", {packet_size})
+pktgen.set("all", "sport", {sport})
+pktgen.set("all", "dport", {dport})
+pktgen.set_mac("all", "src", {_lua_string(nic["mac"])})
+pktgen.set_mac("all", "dst", {_lua_string(check["destination_mac"])})
+pktgen.set_ipaddr("all", "src", {_lua_string(check["source_ip"])})
+pktgen.set_ipaddr("all", "dst", {_lua_string(check["destination_ip"])})
+pktgen.set_proto("all", {_lua_string(protocol)})
+pktgen.start("all")
+pktgen.delay({duration_ms})
+pktgen.stop("all")
+prints("pktStats", pktgen.pktStats("all"))
+pktgen.quit()
+"""
+    command = (
+        "set -euo pipefail; "
+        f"mkdir -p {shlex.quote(remote_dir)}; "
+        "pktgen_bin=$(command -v pktgen-dpdk || command -v pktgen || true); "
+        'if [ -z "$pktgen_bin" ]; then echo "pktgen-dpdk/pktgen not found" >&2; exit 127; fi; '
+        f"cat > {shlex.quote(script_path)} <<'PULSAROS_PKTGEN_LUA'\n"
+        f"{lua}"
+        "PULSAROS_PKTGEN_LUA\n"
+        f"timeout {timeout} \"$pktgen_bin\" -l 0-1 -n 2 --no-pci "
+        f"--vdev=net_af_packet0,iface={shlex.quote(source_if)} -- "
+        f"-T -P -m '[1].0' -f {shlex.quote(script_path)} "
+        f"> {shlex.quote(log_path)} 2>&1; "
+        f"cat {shlex.quote(log_path)}"
+    )
+    ssh(
+        topology,
+        ssh_user,
+        ssh_key,
+        check["source"],
+        f"sudo -n bash -lc {shlex.quote(command)}",
+        timeout=timeout + 10,
+    )
+
+
 def test_topology_check(topology, ssh_user, ssh_key, topology_check):
     if topology_check is None:
         pytest.skip("topology declares no checks")
@@ -150,5 +212,7 @@ def test_topology_check(topology, ssh_user, ssh_key, topology_check):
         _run_ping_check(topology, ssh_user, ssh_key, topology_check)
     elif topology_check["type"] == "packet_capture":
         _run_packet_capture_check(topology, ssh_user, ssh_key, topology_check)
+    elif topology_check["type"] == "pktgen_dpdk":
+        _run_pktgen_dpdk_check(topology, ssh_user, ssh_key, topology_check)
     else:
         pytest.fail(f"unsupported topology check type: {topology_check['type']}")

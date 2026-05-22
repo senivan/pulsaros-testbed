@@ -119,6 +119,31 @@ def validate_packet_capture_check(hosts, check, label):
     validate_ping_check(hosts, trigger, f"{label} trigger")
 
 
+def validate_pktgen_dpdk_check(hosts, check, label):
+    source = check.get("source")
+    nic = check.get("nic")
+    if not source:
+        die(f"{label} must define source")
+    if not nic:
+        die(f"{label} must define nic")
+    validate_host_nic_ref(hosts, source, nic, label)
+    for field in ("destination_mac", "source_ip", "destination_ip"):
+        if not check.get(field):
+            die(f"{label} must define {field}")
+    protocol = check.get("protocol", "udp")
+    if protocol not in ("udp", "tcp", "icmp"):
+        die(f"{label} protocol must be udp, tcp, or icmp")
+    packet_size = int(check.get("packet_size", 128))
+    if packet_size < 64 or packet_size > 1518:
+        die(f"{label} packet_size must be between 64 and 1518")
+    rate_percent = int(check.get("rate_percent", 1))
+    if rate_percent < 1 or rate_percent > 100:
+        die(f"{label} rate_percent must be between 1 and 100")
+    duration = int(check.get("duration", 5))
+    if duration < 1:
+        die(f"{label} duration must be at least 1 second")
+
+
 def validate_checks(hosts, checks):
     if checks in (None, []):
         return []
@@ -138,6 +163,8 @@ def validate_checks(hosts, checks):
             validate_ping_check(hosts, check, f"check {name}")
         elif check_type == "packet_capture":
             validate_packet_capture_check(hosts, check, f"check {name}")
+        elif check_type == "pktgen_dpdk":
+            validate_pktgen_dpdk_check(hosts, check, f"check {name}")
         else:
             die(f"check {name} has unsupported type {check_type}")
     validate_unique(names, "check name")
@@ -248,8 +275,6 @@ def render(topology_path, previous=None):
             "management_ip": previous_hosts.get(name, {}).get("management_ip", ""),
         }
     validate_unique(all_mac_offsets, "mac_offset")
-    checks = validate_checks(hosts, source.get("checks", []))
-
     resolved = {
         "schema_version": 1,
         "name": source["name"],
@@ -261,7 +286,6 @@ def render(topology_path, previous=None):
         "networks": networks,
         "hosts": hosts,
         "plays": source.get("plays", []),
-        "checks": checks,
         "compat": source.get("compat", {}),
     }
     if network_mode == "qinq":
@@ -272,6 +296,8 @@ def render(topology_path, previous=None):
             "mtu": env_int("QINQ_MTU", 1496),
             "ipam": env_str("QINQ_IPAM", "pve"),
         }
+    checks = validate_checks(hosts, source.get("checks", []))
+    resolved["checks"] = resolve_tokens(resolved, {}, checks)
     return resolved
 
 
@@ -302,6 +328,17 @@ def resolve_token(data, current_host, value):
         network_name, field = rest.split(".", 1)
         return data["networks"][network_name].get(field, "")
     die(f"unknown topology reference: {value}")
+
+
+def resolve_tokens(data, current_host, value):
+    if isinstance(value, dict):
+        return {
+            key: resolve_tokens(data, current_host, item)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [resolve_tokens(data, current_host, item) for item in value]
+    return resolve_token(data, current_host, value)
 
 
 def write_json(data):

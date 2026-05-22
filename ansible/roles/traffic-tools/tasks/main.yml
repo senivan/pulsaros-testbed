@@ -1,0 +1,26 @@
+---
+- name: Try to install pktgen-dpdk package
+  ansible.builtin.shell: |
+    set -euo pipefail
+    dnf install -y dpdk || true
+    dnf install -y pktgen-dpdk || dnf install -y pktgen || true
+  args:
+    executable: /bin/bash
+  changed_when: false
+
+- name: Check for pktgen-dpdk
+  ansible.builtin.shell: command -v pktgen-dpdk
+  register: pktgen_dpdk
+  changed_when: false
+  failed_when: false
+
+- name: Check for pktgen
+  ansible.builtin.shell: command -v pktgen
+  register: pktgen
+  changed_when: false
+  failed_when: false
+
+- name: Warn if pktgen-dpdk is unavailable
+  ansible.builtin.debug:
+    msg: "pktgen-dpdk/pktgen is unavailable; topology pktgen_dpdk checks will fail if declared."
+  when: pktgen_dpdk.rc != 0 and pktgen.rc != 0

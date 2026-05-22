@@ -100,6 +100,11 @@ VNI:                100
 UDP port:           4789
 ```
 
+The default topology also declares a `pktgen_dpdk` check from `client-a` on its
+left dataplane NIC toward `client-b`. The check uses Pktgen-DPDK with the DPDK
+AF_PACKET PMD, so the client NIC remains visible to Linux and does not need to
+be rebound to a userspace driver.
+
 ## Adding Networks
 
 Add new logical networks in a topology YAML file under `networks`. Each network
