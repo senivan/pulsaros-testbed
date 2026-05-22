@@ -45,6 +45,8 @@ def test_default_topology_renders_legacy_compat(monkeypatch):
     assert data["qinq"]["service_vlan"] == 3456
     assert data["checks"][0]["name"] == "overlay-ping"
     assert data["checks"][1]["captures"][0]["nic"] == "underlay"
+    assert data["checks"][2]["name"] == "pktgen-client-a-to-b"
+    assert data["checks"][2]["destination_mac"] == data["hosts"]["client-b"]["nics"][1]["mac"]
 
 
 def test_default_topology_resolves_ansible_vars(monkeypatch):
@@ -147,6 +149,29 @@ def test_packet_capture_rejects_unknown_nic(monkeypatch, tmp_path):
                     type: ping
                     source: host-a
                     destination: 10.10.0.2
+                """
+            ).strip(),
+            "  ",
+        ),
+    )
+
+    with pytest.raises(SystemExit):
+        render_topology.render(topology)
+
+
+def test_pktgen_dpdk_rejects_missing_destination_mac(monkeypatch, tmp_path):
+    base_env(monkeypatch)
+    topology = write_topology(
+        tmp_path,
+        textwrap.indent(
+            textwrap.dedent(
+                """
+                - name: bad-pktgen
+                  type: pktgen_dpdk
+                  source: host-a
+                  nic: data
+                  source_ip: 10.10.0.1/24
+                  destination_ip: 10.10.0.2
                 """
             ).strip(),
             "  ",

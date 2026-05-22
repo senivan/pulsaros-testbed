@@ -133,9 +133,9 @@ The create step renders `artifacts/topology.json`, `artifacts/topology.env`,
 `ansible/inventory.generated.ini`, and `ansible/site.generated.yml`.
 
 Topology-specific tests should be declared in the topology `checks:` section.
-The generic pytest executor currently supports `ping` and `packet_capture`
-checks, so new topologies do not need new fixed-host pytest modules for basic
-connectivity validation.
+The generic pytest executor currently supports `ping`, `packet_capture`, and
+`pktgen_dpdk` checks, so new topologies do not need new fixed-host pytest
+modules for basic connectivity and traffic generation validation.
 
 ## GitHub Actions Run
 
