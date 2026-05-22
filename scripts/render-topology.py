@@ -73,6 +73,77 @@ def validate_unique(values, label):
         seen.add(value)
 
 
+def validate_host_ref(hosts, host_name, label):
+    if host_name not in hosts:
+        die(f"{label} references unknown host {host_name}")
+
+
+def validate_host_nic_ref(hosts, host_name, nic_name, label):
+    validate_host_ref(hosts, host_name, label)
+    if not any(nic["name"] == nic_name for nic in hosts[host_name]["nics"]):
+        die(f"{label} references unknown nic {host_name}.{nic_name}")
+
+
+def validate_ping_check(hosts, check, label):
+    source = check.get("source")
+    destination = check.get("destination")
+    if not source:
+        die(f"{label} must define source")
+    if not destination:
+        die(f"{label} must define destination")
+    validate_host_ref(hosts, source, label)
+
+
+def validate_packet_capture_check(hosts, check, label):
+    captures = check.get("captures")
+    trigger = check.get("trigger")
+    if not isinstance(captures, list) or not captures:
+        die(f"{label} must define captures")
+    for index, capture in enumerate(captures):
+        capture_label = f"{label} capture {index}"
+        if not isinstance(capture, dict):
+            die(f"{capture_label} must be a mapping")
+        host = capture.get("host")
+        nic = capture.get("nic")
+        if not host:
+            die(f"{capture_label} must define host")
+        if not nic:
+            die(f"{capture_label} must define nic")
+        if not capture.get("filter"):
+            die(f"{capture_label} must define filter")
+        validate_host_nic_ref(hosts, host, nic, capture_label)
+    if not isinstance(trigger, dict):
+        die(f"{label} must define trigger")
+    if trigger.get("type") != "ping":
+        die(f"{label} trigger type must be ping")
+    validate_ping_check(hosts, trigger, f"{label} trigger")
+
+
+def validate_checks(hosts, checks):
+    if checks in (None, []):
+        return []
+    if not isinstance(checks, list):
+        die("checks must be a list")
+    names = []
+    for index, check in enumerate(checks):
+        label = f"check {index}"
+        if not isinstance(check, dict):
+            die(f"{label} must be a mapping")
+        name = check.get("name")
+        if not isinstance(name, str) or not re.fullmatch(r"[a-z0-9][a-z0-9-]*", name):
+            die(f"{label} must define a valid name")
+        names.append(name)
+        check_type = check.get("type")
+        if check_type == "ping":
+            validate_ping_check(hosts, check, f"check {name}")
+        elif check_type == "packet_capture":
+            validate_packet_capture_check(hosts, check, f"check {name}")
+        else:
+            die(f"check {name} has unsupported type {check_type}")
+    validate_unique(names, "check name")
+    return checks
+
+
 def render(topology_path, previous=None):
     source = load_yaml(topology_path)
     if source.get("schema_version") != 1:
@@ -177,6 +248,7 @@ def render(topology_path, previous=None):
             "management_ip": previous_hosts.get(name, {}).get("management_ip", ""),
         }
     validate_unique(all_mac_offsets, "mac_offset")
+    checks = validate_checks(hosts, source.get("checks", []))
 
     resolved = {
         "schema_version": 1,
@@ -189,6 +261,7 @@ def render(topology_path, previous=None):
         "networks": networks,
         "hosts": hosts,
         "plays": source.get("plays", []),
+        "checks": checks,
         "compat": source.get("compat", {}),
     }
     if network_mode == "qinq":

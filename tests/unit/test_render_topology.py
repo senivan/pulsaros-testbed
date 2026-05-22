@@ -1,6 +1,7 @@
 import importlib.util
 import os
 import pathlib
+import textwrap
 
 import pytest
 
@@ -42,6 +43,8 @@ def test_default_topology_renders_legacy_compat(monkeypatch):
     assert data["networks"]["underlay"]["inner_vlan"] == 102
     assert data["qinq"]["zone"] == "pq123456"
     assert data["qinq"]["service_vlan"] == 3456
+    assert data["checks"][0]["name"] == "overlay-ping"
+    assert data["checks"][1]["captures"][0]["nic"] == "underlay"
 
 
 def test_default_topology_resolves_ansible_vars(monkeypatch):
@@ -71,3 +74,84 @@ def test_bridge_mode_uses_legacy_vlan_tags(monkeypatch):
     assert data["networks"]["underlay"]["bridge"] == "vmbr-test,tag=3458"
     assert data["networks"]["right-l2"]["bridge"] == "vmbr-test,tag=3459"
     assert "qinq" not in data
+
+
+def write_topology(tmp_path, checks):
+    path = tmp_path / "topology.yml"
+    path.write_text(
+        textwrap.dedent(
+            f"""
+            schema_version: 1
+            name: bad-checks
+            networks:
+              dataplane:
+                mode: access
+                vnet_prefix: pd
+                inner_vlan: 101
+            hosts:
+              host-a:
+                vmid_offset: 1
+                groups: []
+                nics:
+                  - name: mgmt
+                    network: management
+                    mac_offset: 1
+                    management: true
+                  - name: data
+                    network: dataplane
+                    mac_offset: 11
+            checks:
+            {checks}
+            """
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
+def test_check_rejects_unknown_host(monkeypatch, tmp_path):
+    base_env(monkeypatch)
+    topology = write_topology(
+        tmp_path,
+        textwrap.indent(
+            textwrap.dedent(
+                """
+                - name: bad-ping
+                  type: ping
+                  source: missing-host
+                  destination: 10.10.0.2
+                """
+            ).strip(),
+            "  ",
+        ),
+    )
+
+    with pytest.raises(SystemExit):
+        render_topology.render(topology)
+
+
+def test_packet_capture_rejects_unknown_nic(monkeypatch, tmp_path):
+    base_env(monkeypatch)
+    topology = write_topology(
+        tmp_path,
+        textwrap.indent(
+            textwrap.dedent(
+                """
+                - name: bad-capture
+                  type: packet_capture
+                  captures:
+                    - host: host-a
+                      nic: missing-nic
+                      filter: udp port 4789
+                  trigger:
+                    type: ping
+                    source: host-a
+                    destination: 10.10.0.2
+                """
+            ).strip(),
+            "  ",
+        ),
+    )
+
+    with pytest.raises(SystemExit):
+        render_topology.render(topology)

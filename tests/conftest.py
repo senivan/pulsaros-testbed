@@ -45,6 +45,7 @@ def topology():
     data = _load_env_file(TOPOLOGY)
     resolved = _load_json_file(TOPOLOGY_JSON)
     if resolved:
+        data["__resolved__"] = resolved
         data["__hosts__"] = resolved.get("hosts", {})
         missing = [
             host
@@ -64,6 +65,10 @@ def all_hosts(topology):
     return tuple(topology.get("__hosts__", HOSTS).keys())
 
 
+def resolved_topology(topology):
+    return topology.get("__resolved__", {})
+
+
 def group_hosts(topology, group):
     hosts = topology.get("__hosts__")
     if not hosts:
@@ -73,6 +78,19 @@ def group_hosts(topology, group):
             return ("client-a", "client-b")
         return all_hosts(topology)
     return tuple(name for name, values in hosts.items() if group in values.get("groups", []))
+
+
+def host_ip(topology, host):
+    if "__hosts__" in topology:
+        return topology["__hosts__"][host]["management_ip"]
+    return topology[HOSTS[host]]
+
+
+def host_nic(topology, host, nic_name):
+    for nic in topology["__hosts__"][host]["nics"]:
+        if nic["name"] == nic_name:
+            return nic
+    pytest.fail(f"host {host} has no nic {nic_name}")
 
 
 @pytest.fixture(scope="session")
@@ -88,10 +106,7 @@ def ssh_key():
 
 
 def ssh(topology, ssh_user, ssh_key, host, command, timeout=60, check=True):
-    if "__hosts__" in topology:
-        ip = topology["__hosts__"][host]["management_ip"]
-    else:
-        ip = topology[HOSTS[host]]
+    ip = host_ip(topology, host)
     args = [
         "ssh",
         "-i",
@@ -116,10 +131,7 @@ def ssh(topology, ssh_user, ssh_key, host, command, timeout=60, check=True):
 
 
 def scp_from(topology, ssh_user, ssh_key, host, remote_path, local_path, timeout=60):
-    if "__hosts__" in topology:
-        ip = topology["__hosts__"][host]["management_ip"]
-    else:
-        ip = topology[HOSTS[host]]
+    ip = host_ip(topology, host)
     local_path = pathlib.Path(local_path)
     local_path.parent.mkdir(parents=True, exist_ok=True)
     args = [

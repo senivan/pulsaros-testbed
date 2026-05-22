@@ -38,9 +38,10 @@ ansible/site.generated.yml
 
 Add new topologies as YAML files under `topologies/`. A topology declares
 networks, hosts, NICs, Ansible host variables, generated playbook roles, and
-compatibility aliases for tests that still consume legacy env keys. Scripts
-consume the resolved JSON instead of hard-coding host names where the workflow
-is topology-generic.
+scenario acceptance checks. Compatibility aliases are still rendered for older
+scripts, but topology-specific pytest assertions should consume the resolved
+JSON and the topology-declared `checks:` section instead of hard-coding host
+names.
 
 The GitHub runner does not host the test workload. It only calls Proxmox tools,
 runs Ansible over SSH, invokes pytest, and uploads artifacts.

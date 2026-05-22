@@ -120,7 +120,8 @@ Topology YAML declares:
 - Hosts, VMID offsets, groups, and NICs.
 - Ansible host variables.
 - The generated playbook roles.
-- Compatibility aliases for existing tests and scripts.
+- Scenario acceptance checks such as pings and packet captures.
+- Compatibility aliases for older scripts.
 
 To add a new topology, add a YAML file under `topologies/` and run with:
 
@@ -130,6 +131,11 @@ export TOPOLOGY=<file-name-without-.yml>
 
 The create step renders `artifacts/topology.json`, `artifacts/topology.env`,
 `ansible/inventory.generated.ini`, and `ansible/site.generated.yml`.
+
+Topology-specific tests should be declared in the topology `checks:` section.
+The generic pytest executor currently supports `ping` and `packet_capture`
+checks, so new topologies do not need new fixed-host pytest modules for basic
+connectivity validation.
 
 ## GitHub Actions Run
 

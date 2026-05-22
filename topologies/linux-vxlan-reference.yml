@@ -119,6 +119,32 @@ plays:
     roles:
       - vxlan-test
 
+checks:
+  - name: overlay-ping
+    type: ping
+    source: client-a
+    destination: 10.10.0.2
+    count: 3
+    wait: 2
+    timeout: 30
+
+  - name: vxlan-udp-4789
+    type: packet_capture
+    captures:
+      - host: vtep-a
+        nic: underlay
+        filter: udp port 4789
+      - host: vtep-b
+        nic: underlay
+        filter: udp port 4789
+    trigger:
+      type: ping
+      source: client-a
+      destination: 10.10.0.2
+      count: 5
+      wait: 2
+      timeout: 40
+
 compat:
   CLIENT_A: "@host:client-a.vmid"
   VTEP_A: "@host:vtep-a.vmid"
