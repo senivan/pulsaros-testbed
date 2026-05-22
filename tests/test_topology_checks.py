@@ -151,7 +151,7 @@ def _run_pktgen_dpdk_check(topology, ssh_user, ssh_key, check):
     source_if = iface_by_mac(topology, ssh_user, ssh_key, check["source"], nic["mac"])
     duration_ms = _check_value(check, "duration", 5) * 1000
     timeout = _check_value(check, "timeout", 30)
-    packet_count = _check_value(check, "count", 0)
+    packet_count = _check_value(check, "count", 1024)
     packet_size = _check_value(check, "packet_size", 128)
     rate_percent = _check_value(check, "rate_percent", 1)
     sport = _check_value(check, "source_port", 1234)
@@ -188,9 +188,9 @@ pktgen.quit()
         f"cat > {shlex.quote(script_path)} <<'PULSAROS_PKTGEN_LUA'\n"
         f"{lua}"
         "PULSAROS_PKTGEN_LUA\n"
-        f"timeout {timeout} \"$pktgen_bin\" -l 0-1 -n 2 --no-pci "
+        f"timeout {timeout} \"$pktgen_bin\" -l 0-2 -n 2 --no-pci "
         f"--vdev=net_af_packet0,iface={shlex.quote(source_if)} -- "
-        f"-T -P -m '[1].0' -f {shlex.quote(script_path)} "
+        f"-P -m '[1:2].0' -f {shlex.quote(script_path)} "
         f"> {shlex.quote(log_path)} 2>&1; "
         f"cat {shlex.quote(log_path)}"
     )
