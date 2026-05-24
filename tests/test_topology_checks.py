@@ -195,6 +195,15 @@ pktgen.quit()
         f"> {shlex.quote(log_path)} 2>&1; "
         "pktgen_rc=$?; "
         f"cat {shlex.quote(log_path)}; "
+        'if [ "$pktgen_rc" -ne 0 ]; then '
+        'echo "=== pktgen failure diagnostics ==="; '
+        "trap_line=$(dmesg | grep 'pktgen.*trap' | tail -n 1 || true); "
+        'echo "${trap_line}"; '
+        "offset=$(printf '%s' \"$trap_line\" | sed -n 's/.*in pktgen\\[\\([^,]*\\),.*/0x\\1/p'); "
+        'if [ -n "$offset" ] && command -v addr2line >/dev/null 2>&1; then '
+        'addr2line -Cfpe "$pktgen_bin" "$offset" || true; '
+        "fi; "
+        "fi; "
         "exit ${pktgen_rc}"
     )
     ssh(
