@@ -61,11 +61,45 @@
 
     path = Path("app/pktgen.c")
     text = path.read_text()
-    old = "    wire_size = pktgen_wire_size(port);\n    if (port->link.link_speed == 0) {\n"
-    new = "    wire_size = pktgen_wire_size(port);\n    if (wire_size == 0 || port->link.link_speed == 0) {\n"
-    if old not in text:
-        raise SystemExit("pktgen_packet_rate patch target not found")
-    path.write_text(text.replace(old, new, 1))
+    replacements = [
+        (
+            "    return (size * 8);\n",
+            "    if (size == 0)\n"
+            "        size = WIRE_SIZE(RTE_ETHER_MIN_LEN, uint64_t);\n"
+            "    return (size * 8);\n",
+        ),
+        (
+            "    wire_size = pktgen_wire_size(port);\n    if (port->link.link_speed == 0) {\n",
+            "    wire_size = pktgen_wire_size(port);\n"
+            "    if (wire_size == 0 || port->link.link_speed == 0) {\n",
+        ),
+        (
+            "    uint64_t link_speed, pps, cpb, txcnt;\n",
+            "    uint64_t link_speed, wire_size, pps, cpb, txcnt;\n",
+        ),
+        (
+            "    txcnt = l2p_get_txcnt(port->pid);\n\n"
+            "    // packets per second per thread based on requested (tx_rate/txcnt)\n"
+            "    pps = (((link_speed / pktgen_wire_size(port)) * (port->tx_rate / txcnt)) / 100);\n",
+            "    txcnt     = l2p_get_txcnt(port->pid);\n"
+            "    wire_size = pktgen_wire_size(port);\n"
+            "    if (wire_size == 0 || txcnt == 0) {\n"
+            "        port->tx_cycles = 0;\n"
+            "        port->tx_pps    = 0;\n"
+            "        return;\n"
+            "    }\n\n"
+            "    // packets per second per thread based on requested (tx_rate/txcnt)\n"
+            "    pps = (((link_speed / wire_size) * (port->tx_rate / txcnt)) / 100);\n",
+        ),
+    ]
+    applied = 0
+    for old, new in replacements:
+        if old in text:
+            text = text.replace(old, new, 1)
+            applied += 1
+    if applied < 2:
+        raise SystemExit("pktgen rate patch targets not found")
+    path.write_text(text)
     PY
     rm -rf builddir
     meson setup builddir \
