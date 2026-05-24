@@ -100,6 +100,26 @@
     if applied < 2:
         raise SystemExit("pktgen rate patch targets not found")
     path.write_text(text)
+
+    path = Path("lib/common/coreinfo.c")
+    text = path.read_text()
+    old = (
+        "    hmap_get_u16(cid->map, NULL, CI_NUM_CPU_CORES, &num_cpu_cores);\n"
+        "    hmap_get_u16(cid->map, NULL, CI_NUM_SOCKETS, &num_sockets);\n"
+        "    if (num_sockets == 0)\n"
+        "        num_sockets = 1;\n"
+    )
+    new = (
+        "    hmap_get_u16(cid->map, NULL, CI_NUM_CPU_CORES, &num_cpu_cores);\n"
+        "    hmap_get_u16(cid->map, NULL, CI_NUM_SOCKETS, &num_sockets);\n"
+        "    if (num_cpu_cores == 0)\n"
+        "        num_cpu_cores = 1;\n"
+        "    if (num_sockets == 0)\n"
+        "        num_sockets = 1;\n"
+    )
+    if old not in text:
+        raise SystemExit("pktgen coreinfo patch target not found")
+    path.write_text(text.replace(old, new, 1))
     PY
     rm -rf builddir
     meson setup builddir \
