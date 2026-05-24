@@ -120,6 +120,28 @@
     if old not in text:
         raise SystemExit("pktgen coreinfo patch target not found")
     path.write_text(text.replace(old, new, 1))
+
+    path = Path("lib/cli/cli_scrn.c")
+    text = path.read_text()
+    old = (
+        "            if (tcgetattr(fileno(scrn->fd_in), &scrn->oldterm)) {\n"
+        "                fprintf(stderr, \"%s: tcgetattr failed\\n\", __func__);\n"
+        "                exit(-1);\n"
+        "            }\n"
+    )
+    new = (
+        "            if (tcgetattr(fileno(scrn->fd_in), &scrn->oldterm)) {\n"
+        "                fprintf(stderr, \"%s: tcgetattr failed; using non-interactive screen\\n\", __func__);\n"
+        "                scrn->type  = SCRN_NOTTY_TYPE;\n"
+        "                scrn->nrows = 24;\n"
+        "                scrn->ncols = 80;\n"
+        "                scrn_color(SCRN_DEFAULT_FG, SCRN_DEFAULT_BG, SCRN_OFF);\n"
+        "                return 0;\n"
+        "            }\n"
+    )
+    if old not in text:
+        raise SystemExit("pktgen screen patch target not found")
+    path.write_text(text.replace(old, new, 1))
     PY
     rm -rf builddir
     meson setup builddir \
