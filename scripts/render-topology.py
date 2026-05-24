@@ -130,6 +130,9 @@ def validate_pktgen_dpdk_check(hosts, check, label):
     for field in ("destination_mac", "source_ip", "destination_ip"):
         if not check.get(field):
             die(f"{label} must define {field}")
+    for field in ("source_ip", "destination_ip"):
+        if "/" in str(check[field]):
+            die(f"{label} {field} must be an address, not a CIDR")
     protocol = check.get("protocol", "udp")
     if protocol not in ("udp", "tcp", "icmp"):
         die(f"{label} protocol must be udp, tcp, or icmp")

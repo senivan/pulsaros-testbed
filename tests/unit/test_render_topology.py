@@ -170,6 +170,30 @@ def test_pktgen_dpdk_rejects_missing_destination_mac(monkeypatch, tmp_path):
                   type: pktgen_dpdk
                   source: host-a
                   nic: data
+                  source_ip: 10.10.0.1
+                  destination_ip: 10.10.0.2
+                """
+            ).strip(),
+            "  ",
+        ),
+    )
+
+    with pytest.raises(SystemExit):
+        render_topology.render(topology)
+
+
+def test_pktgen_dpdk_rejects_cidr_source_ip(monkeypatch, tmp_path):
+    base_env(monkeypatch)
+    topology = write_topology(
+        tmp_path,
+        textwrap.indent(
+            textwrap.dedent(
+                """
+                - name: bad-pktgen
+                  type: pktgen_dpdk
+                  source: host-a
+                  nic: data
+                  destination_mac: 52:54:00:00:00:02
                   source_ip: 10.10.0.1/24
                   destination_ip: 10.10.0.2
                 """

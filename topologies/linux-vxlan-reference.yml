@@ -156,7 +156,7 @@ checks:
     source: client-a
     nic: left
     destination_mac: "@host:client-b.nic:right.mac"
-    source_ip: 10.10.0.1/24
+    source_ip: 10.10.0.1
     destination_ip: 10.10.0.2
     protocol: udp
     packet_size: 128
