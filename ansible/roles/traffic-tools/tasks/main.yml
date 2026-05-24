@@ -56,6 +56,17 @@
     fi
 
     cd "${source_dir}"
+    python3 - <<'PY'
+    from pathlib import Path
+
+    path = Path("app/pktgen.c")
+    text = path.read_text()
+    old = "    wire_size = pktgen_wire_size(port);\n    if (port->link.link_speed == 0) {\n"
+    new = "    wire_size = pktgen_wire_size(port);\n    if (wire_size == 0 || port->link.link_speed == 0) {\n"
+    if old not in text:
+        raise SystemExit("pktgen_packet_rate patch target not found")
+    path.write_text(text.replace(old, new, 1))
+    PY
     rm -rf builddir
     meson setup builddir \
       -Denable_lua=true \
