@@ -188,11 +188,14 @@ pktgen.quit()
         f"cat > {shlex.quote(script_path)} <<'PULSAROS_PKTGEN_LUA'\n"
         f"{lua}"
         "PULSAROS_PKTGEN_LUA\n"
+        "set +e; "
         f"timeout {timeout} \"$pktgen_bin\" -l 0-2 -n 2 --no-pci "
         f"--vdev=net_af_packet0,iface={shlex.quote(source_if)} -- "
         f"-P -m '[1:2].0' -f {shlex.quote(script_path)} "
         f"> {shlex.quote(log_path)} 2>&1; "
-        f"cat {shlex.quote(log_path)}"
+        "pktgen_rc=$?; "
+        f"cat {shlex.quote(log_path)}; "
+        "exit ${pktgen_rc}"
     )
     ssh(
         topology,
