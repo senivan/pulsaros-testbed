@@ -188,10 +188,23 @@ pktgen.quit()
         f"cat > {shlex.quote(script_path)} <<'PULSAROS_PKTGEN_LUA'\n"
         f"{lua}"
         "PULSAROS_PKTGEN_LUA\n"
+        "lcore_count=$(nproc); "
+        'if [ "$lcore_count" -lt 2 ]; then '
+        'echo "pktgen-dpdk requires at least 2 lcores, found ${lcore_count}; '
+        'check guest CPU count and kernel CONFIG_NR_CPUS" >&2; '
+        "exit 1; "
+        "fi; "
+        'if [ "$lcore_count" -ge 3 ]; then '
+        "pktgen_lcores=0,1,2; "
+        "pktgen_matrix='[1:2].0'; "
+        "else "
+        "pktgen_lcores=0,1; "
+        "pktgen_matrix=1.0; "
+        "fi; "
         "set +e; "
-        f"timeout {timeout} \"$pktgen_bin\" -l 0-2 -n 2 --no-pci "
+        f"timeout {timeout} \"$pktgen_bin\" -l \"$pktgen_lcores\" -n 2 --no-pci "
         f"--vdev=net_af_packet0,iface={shlex.quote(source_if)} -- "
-        f"-P -m '[1:2].0' -f {shlex.quote(script_path)} "
+        f"-P -m \"$pktgen_matrix\" -f {shlex.quote(script_path)} "
         f"> {shlex.quote(log_path)} 2>&1; "
         "pktgen_rc=$?; "
         f"cat {shlex.quote(log_path)}; "
