@@ -14,5 +14,7 @@ REQUESTED_RUN_ID="$RUN_ID"
 source artifacts/topology.env
 [[ "${RUN_ID:-}" == "$REQUESTED_RUN_ID" ]] || die "topology RUN_ID does not match requested RUN_ID"
 
+./scripts/run-state.py phase inventory --status started --run-id "$RUN_ID"
 ./scripts/render-topology.py ansible
+./scripts/run-state.py phase inventory --status completed --run-id "$RUN_ID"
 log "Generated ansible/inventory.generated.ini and ansible/site.generated.yml"

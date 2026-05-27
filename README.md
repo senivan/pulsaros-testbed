@@ -17,6 +17,7 @@ The GitHub runner is only the orchestrator. Each run renders a topology, creates
 - Uses `vmbr0` by default for management.
 - Uses Proxmox SDN QinQ by default for disposable dataplane networks on top of `vmbr-test`.
 - Renders per-run state into `artifacts/topology.json` and compatibility values into `artifacts/topology.env`.
+- Tracks lifecycle progress and generated resource state in `artifacts/run-state.json`.
 - Generates `ansible/inventory.generated.ini` and `ansible/site.generated.yml`.
 - Can build PulsarOS kernel RPMs on a GitHub-hosted runner and install them into the Proxmox VMs.
 - Runs kernel, hugepage, DPDK availability, and Linux VXLAN reference tests.
@@ -131,6 +132,12 @@ To add a new topology, add a YAML file under `topologies/` and run with:
 export TOPOLOGY=<file-name-without-.yml>
 ```
 
+Validate a topology without touching Proxmox or generated artifacts:
+
+```bash
+./scripts/render-topology.py validate --topology-file topologies/linux-vxlan-reference.yml
+```
+
 The create step renders `artifacts/topology.json`, `artifacts/topology.env`,
 `ansible/inventory.generated.ini`, and `ansible/site.generated.yml`.
 
@@ -236,6 +243,7 @@ and generated QinQ SDN names derived from the same run ID.
 
 - `artifacts/topology.json`: canonical resolved topology for the run.
 - `artifacts/topology.env`: compatibility values for existing tests and shell scripts.
+- `artifacts/run-state.json`: lifecycle phase and generated resource status.
 - `ansible/inventory.generated.ini`: generated Ansible inventory.
 - `ansible/site.generated.yml`: generated Ansible playbook.
 - `logs/`: dmesg, journal, ip link, ip addr, and uname output.

@@ -16,6 +16,14 @@ run_pve() {
 RUN_ID="${1:-}"
 [[ "$RUN_ID" =~ ^[0-9]+$ ]] || die "usage: $0 RUN_ID"
 export RUN_ID
+finish_create_state() {
+  local rc=$?
+  if (( rc != 0 )) && [[ -f artifacts/topology.json || -f artifacts/run-state.json ]]; then
+    ./scripts/run-state.py phase create --status failed --message "pve-create-run.sh exited with $rc" --run-id "$RUN_ID" || true
+  fi
+  exit "$rc"
+}
+trap finish_create_state EXIT
 
 need_env TEMPLATE_ID
 need_env STORAGE
@@ -46,6 +54,7 @@ mkdir -p artifacts logs pcaps junit
 
 log "Rendering topology $TOPOLOGY_FILE"
 ./scripts/render-topology.py render --topology-file "$TOPOLOGY_FILE"
+./scripts/run-state.py init --phase rendered
 
 sdn_apply() {
   log "Applying Proxmox SDN configuration"
@@ -73,14 +82,21 @@ create_sdn_qinq() {
   ipam=$(jq -r '.qinq.ipam' artifacts/topology.json)
 
   log "Creating QinQ SDN zone $zone on $sdn_bridge with service VLAN $service_vlan"
-  run_pve pvesh get "/cluster/sdn/zones/$zone" >/dev/null 2>&1 && die "SDN zone $zone already exists"
-  while IFS=$'\t' read -r vnet _; do
-    run_pve pvesh get "/cluster/sdn/vnets/$vnet" >/dev/null 2>&1 && die "SDN VNet $vnet already exists"
-  done < <(jq -r '.networks[] | select(.vnet != "") | [.vnet, .inner_vlan] | @tsv' artifacts/topology.json)
-
-  run_pve pvesh create /cluster/sdn/zones --type qinq --zone "$zone" --bridge "$sdn_bridge" --ipam "$ipam" --tag "$service_vlan" --mtu "$mtu"
+  if run_pve pvesh get "/cluster/sdn/zones/$zone" >/dev/null 2>&1; then
+    log "Reusing existing generated SDN zone $zone"
+    ./scripts/run-state.py sdn zone "$zone" reused
+  else
+    run_pve pvesh create /cluster/sdn/zones --type qinq --zone "$zone" --bridge "$sdn_bridge" --ipam "$ipam" --tag "$service_vlan" --mtu "$mtu"
+    ./scripts/run-state.py sdn zone "$zone" created
+  fi
   while IFS=$'\t' read -r vnet inner_vlan; do
-    run_pve pvesh create /cluster/sdn/vnets --vnet "$vnet" --zone "$zone" --tag "$inner_vlan"
+    if run_pve pvesh get "/cluster/sdn/vnets/$vnet" >/dev/null 2>&1; then
+      log "Reusing existing generated SDN VNet $vnet"
+      ./scripts/run-state.py sdn vnet "$vnet" reused
+    else
+      run_pve pvesh create /cluster/sdn/vnets --vnet "$vnet" --zone "$zone" --tag "$inner_vlan"
+      ./scripts/run-state.py sdn vnet "$vnet" created
+    fi
   done < <(jq -r '.networks[] | select(.vnet != "") | [.vnet, .inner_vlan] | @tsv' artifacts/topology.json)
 
   sdn_apply
@@ -90,17 +106,24 @@ create_sdn_qinq() {
 }
 
 clone_vm() {
-  local vmid="$1" name="$2"
+  local host="$1" vmid="$2" name="$3" actual_name
   if run_pve qm status "$vmid" >/dev/null 2>&1; then
-    die "target VMID $vmid already exists"
+    actual_name=$(run_pve qm config "$vmid" | awk -F': ' '/^name:/ {print $2}')
+    if [[ "$actual_name" != "$name" ]]; then
+      die "target VMID $vmid exists as $actual_name, expected $name"
+    fi
+    log "Reusing existing generated VM $name ($vmid)"
+    ./scripts/run-state.py vm "$host" reused
+    return 0
   fi
   log "Cloning $name as VMID $vmid"
   run_pve qm clone "$TEMPLATE_ID" "$vmid" --name "$name" --full 1 --storage "$STORAGE"
+  ./scripts/run-state.py vm "$host" cloned
 }
 
-while IFS=$'\t' read -r vmid vm_name; do
-  clone_vm "$vmid" "$vm_name"
-done < <(jq -r '.hosts[] | [.vmid, .vm_name] | @tsv' artifacts/topology.json)
+while IFS=$'\t' read -r host vmid vm_name; do
+  clone_vm "$host" "$vmid" "$vm_name"
+done < <(jq -r '.hosts[] | [.name, .vmid, .vm_name] | @tsv' artifacts/topology.json)
 
 if [[ "$NETWORK_MODE" == "qinq" ]]; then
   create_sdn_qinq
@@ -113,11 +136,20 @@ while IFS=$'\t' read -r host vmid; do
   while IFS=$'\t' read -r idx mac bridge; do
     run_pve qm set "$vmid" "--net${idx}" "virtio=$mac,bridge=$bridge,firewall=0"
   done < <(jq -r --arg host "$host" '.hosts[$host].nics | to_entries[] | [.key, .value.mac, .value.bridge] | @tsv' artifacts/topology.json)
+  ./scripts/run-state.py vm "$host" configured
 done < <(jq -r '.hosts[] | [.name, .vmid] | @tsv' artifacts/topology.json)
 
-while IFS=$'\t' read -r vmid vm_name; do
-  log "Starting $vm_name ($vmid)"
-  run_pve qm start "$vmid"
-done < <(jq -r '.hosts[] | [.vmid, .vm_name] | @tsv' artifacts/topology.json)
+while IFS=$'\t' read -r host vmid vm_name; do
+  if run_pve qm status "$vmid" | grep -q "status: running"; then
+    log "$vm_name ($vmid) already running"
+    ./scripts/run-state.py vm "$host" running
+  else
+    log "Starting $vm_name ($vmid)"
+    run_pve qm start "$vmid"
+    ./scripts/run-state.py vm "$host" started
+  fi
+done < <(jq -r '.hosts[] | [.name, .vmid, .vm_name] | @tsv' artifacts/topology.json)
 
+./scripts/run-state.py phase created
+trap - EXIT
 log "Created run $RUN_ID"

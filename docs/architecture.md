@@ -27,6 +27,7 @@ The run state is written to:
 ```text
 artifacts/topology.json  canonical resolved topology
 artifacts/topology.env   compatibility values for existing tests/scripts
+artifacts/run-state.json lifecycle phase and generated resource status
 ```
 
 The inventory step renders:
@@ -55,3 +56,5 @@ runs Ansible over SSH, invokes pytest, and uploads artifacts.
 
 VM lifecycle uses the Proxmox `qm` CLI. The default QinQ dataplane mode also
 uses `pvesh` to create, apply, and delete generated Proxmox SDN zones and VNets.
+Lifecycle scripts update `artifacts/run-state.json` so failed or interrupted
+runs can be inspected and rerun without relying only on step logs.

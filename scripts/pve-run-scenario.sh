@@ -8,6 +8,22 @@ die() { printf '[scenario] ERROR: %s\n' "$*" >&2; exit 1; }
 SCENARIO="${1:-}"
 [[ -n "$SCENARIO" ]] || die "usage: $0 SCENARIO"
 mkdir -p junit pcaps logs artifacts
+record_state() {
+  if [[ -f artifacts/topology.json || -f artifacts/run-state.json ]]; then
+    ./scripts/run-state.py phase "scenario-${SCENARIO}" --status "$1" || true
+  fi
+}
+finish_state() {
+  local rc=$?
+  if (( rc == 0 )); then
+    record_state completed
+  else
+    record_state failed
+  fi
+  exit "$rc"
+}
+trap finish_state EXIT
+record_state started
 
 run_pytest() {
   local name="$1"

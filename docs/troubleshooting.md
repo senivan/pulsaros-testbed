@@ -39,7 +39,7 @@ The testbed requires qemu guest agent for management IP discovery. Check:
 ## VXLAN Ping Fails
 
 Check `logs/*-ip-link.log`, `logs/*-ip-addr.log`, `artifacts/topology.json`,
-and `artifacts/topology.env`.
+`artifacts/topology.env`, and `artifacts/run-state.json`.
 
 Common causes:
 
@@ -52,6 +52,8 @@ Common causes:
 For QinQ runs, `artifacts/topology.json` and `artifacts/topology.env` contain
 the generated zone and VNet names. Check that those names exist on the Proxmox
 host and that the VM NICs are attached to them.
+Log collection also captures `logs/sdn-zone-*.log`, `logs/sdn-vnet-*.log`, and
+`logs/sdn-link-*.log` when the generated SDN objects are still present.
 
 ## Inventory Generation Fails
 

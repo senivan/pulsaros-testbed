@@ -187,6 +187,7 @@ def topology_summary(topology: dict) -> dict:
 def collect_inputs() -> dict:
     ARTIFACTS.mkdir(parents=True, exist_ok=True)
     topology = topology_summary(read_json(ARTIFACTS / "topology.json"))
+    run_state = read_json(ARTIFACTS / "run-state.json")
     junit = [parse_junit_file(path) for path in sorted(JUNIT.glob("*.xml"))]
     log_samples = {}
     for path in sorted(LOGS.glob("*.log")):
@@ -212,6 +213,7 @@ def collect_inputs() -> dict:
             "runner_name": os.environ.get("RUNNER_NAME", ""),
         },
         "topology": topology,
+        "run_state": run_state,
         "topology_env": redact(read_text(ARTIFACTS / "topology.env", limit=12000)),
         "artifact_text": existing_artifacts,
         "junit": junit,
@@ -228,6 +230,9 @@ def local_summary(data: dict) -> str:
     topology = data.get("topology", {})
     if topology:
         lines.append(f"- Topology: `{topology.get('name') or 'unknown'}`")
+    run_state = data.get("run_state", {})
+    if run_state:
+        lines.append(f"- Last lifecycle phase: `{run_state.get('phase') or 'unknown'}`")
 
     totals = {"tests": 0, "failures": 0, "errors": 0, "skipped": 0}
     failed_cases = []
