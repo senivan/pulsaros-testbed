@@ -109,6 +109,18 @@ left dataplane NIC toward `client-b`. The check uses Pktgen-DPDK with the DPDK
 AF_PACKET PMD, so the client NIC remains visible to Linux and does not need to
 be rebound to a userspace driver.
 
+## Traffic Evidence Checks
+
+Topology `checks:` can validate captured VXLAN traffic, not just capture file
+presence. `packet_capture` checks may define `assertions` with `min_packets`,
+`contains`, `not_contains`, `vxlan_vni`, `inner_ips`, and `outer_ips`.
+
+For segment-driven topologies, `segment_bidirectional_capture` runs pings
+between segment members, captures underlay traffic on declared VTEPs, decodes
+the pcaps with tcpdump, and derives expected VNI plus inner/outer IP evidence
+from the resolved segment. Decoded tcpdump logs are uploaded from
+`logs/*-tcpdump.log`.
+
 ## Adding Networks
 
 Add new logical networks in a topology YAML file under `networks`. Each network

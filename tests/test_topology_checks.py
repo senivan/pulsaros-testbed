@@ -10,6 +10,9 @@ import pytest
 
 from conftest import PCAPS, TOPOLOGY_JSON, host_ip, host_nic, iface_by_mac, scp_from, ssh
 
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+LOGS = ROOT / "logs"
+
 
 def _load_checks_for_collection():
     if not TOPOLOGY_JSON.exists():
@@ -54,24 +57,31 @@ def _address(cidr):
     return str(ipaddress.ip_interface(str(cidr)).ip)
 
 
-def _run_segment_ping_matrix_check(topology, ssh_user, ssh_key, check):
-    segment = topology["__resolved__"]["segments"][check["segment"]]
-    members = {
+def _segment_members(segment):
+    return {
         f"{member['host']}.{member['nic']}": member
         for member in segment.get("members", [])
     }
+
+
+def _check_pairs(segment, check):
+    members = _segment_members(segment)
     if check.get("pairs"):
-        pairs = [
+        return [
             (members[pair["source"]], members[pair["destination"]])
             for pair in check["pairs"]
         ]
-    else:
-        pairs = [
-            (source, destination)
-            for source in segment.get("members", [])
-            for destination in segment.get("members", [])
-            if source["host"] != destination["host"] or source["nic"] != destination["nic"]
-        ]
+    return [
+        (source, destination)
+        for source in segment.get("members", [])
+        for destination in segment.get("members", [])
+        if source["host"] != destination["host"] or source["nic"] != destination["nic"]
+    ]
+
+
+def _run_segment_ping_matrix_check(topology, ssh_user, ssh_key, check):
+    segment = topology["__resolved__"]["segments"][check["segment"]]
+    pairs = _check_pairs(segment, check)
 
     count = _check_value(check, "count", 3)
     wait = _check_value(check, "wait", 2)
@@ -92,11 +102,18 @@ def _pcap_name(check_name, capture):
     return re.sub(r"[^A-Za-z0-9_.-]", "-", raw)
 
 
+def _decode_name(check_name, capture):
+    raw = f"{check_name}-{capture['host']}-{capture['nic']}-tcpdump.log"
+    return re.sub(r"[^A-Za-z0-9_.-]", "-", raw)
+
+
 def _start_capture(topology, ssh_user, ssh_key, check_name, capture):
     nic = host_nic(topology, capture["host"], capture["nic"])
     capture_if = iface_by_mac(topology, ssh_user, ssh_key, capture["host"], nic["mac"])
     remote_pcap = f"/tmp/pulsaros-testbed/{_pcap_name(check_name, capture)}"
     local_pcap = PCAPS / _pcap_name(check_name, capture)
+    remote_decode = f"/tmp/pulsaros-testbed/{_decode_name(check_name, capture)}"
+    local_decode = LOGS / _decode_name(check_name, capture)
 
     ssh(
         topology,
@@ -125,7 +142,9 @@ def _start_capture(topology, ssh_user, ssh_key, check_name, capture):
     return {
         "host": capture["host"],
         "remote_pcap": remote_pcap,
+        "remote_decode": remote_decode,
         "local_pcap": local_pcap,
+        "local_decode": local_decode,
         "process": process,
     }
 
@@ -160,6 +179,73 @@ def _collect_capture(topology, ssh_user, ssh_key, capture):
     )
     assert result.returncode == 0, result.stderr
     assert pathlib.Path(capture["local_pcap"]).stat().st_size > 0
+    decode_script = (
+        f"count=$(tcpdump -nn -r {shlex.quote(capture['remote_pcap'])} 2>/dev/null | wc -l); "
+        f"printf 'PULSAROS_PACKET_COUNT=%s\\n' \"$count\" > {shlex.quote(capture['remote_decode'])}; "
+        f"tcpdump -nn -e -vv -r {shlex.quote(capture['remote_pcap'])} "
+        f">> {shlex.quote(capture['remote_decode'])} 2>&1; "
+        f"chmod 0644 {shlex.quote(capture['remote_decode'])}"
+    )
+    decode_command = f"sudo -n sh -c {shlex.quote(decode_script)}"
+    ssh(topology, ssh_user, ssh_key, capture["host"], decode_command, timeout=30)
+    result = scp_from(
+        topology,
+        ssh_user,
+        ssh_key,
+        capture["host"],
+        capture["remote_decode"],
+        capture["local_decode"],
+    )
+    assert result.returncode == 0, result.stderr
+    assert pathlib.Path(capture["local_decode"]).stat().st_size > 0
+
+
+def _packet_count(decoded_text):
+    return sum(
+        int(match.group(1))
+        for match in re.finditer(r"^PULSAROS_PACKET_COUNT=(\d+)$", decoded_text, re.MULTILINE)
+    )
+
+
+def _assert_decoded_capture(decoded_text, assertions, label):
+    if not assertions:
+        return
+    min_packets = int(assertions.get("min_packets", 0))
+    if min_packets and _packet_count(decoded_text) < min_packets:
+        pytest.fail(
+            f"{label}: expected at least {min_packets} decoded packets, "
+            f"got {_packet_count(decoded_text)}"
+        )
+
+    required = list(assertions.get("contains", []))
+    forbidden = list(assertions.get("not_contains", []))
+    if assertions.get("vxlan_vni") not in (None, ""):
+        required.append(rf"\b(vni|VXLAN).*{re.escape(str(assertions['vxlan_vni']))}\b")
+    for ip in assertions.get("inner_ips", []):
+        required.append(re.escape(str(ip)))
+    for ip in assertions.get("outer_ips", []):
+        required.append(re.escape(str(ip)))
+
+    missing = [pattern for pattern in required if not re.search(pattern, decoded_text, re.MULTILINE)]
+    present_forbidden = [
+        pattern for pattern in forbidden if re.search(pattern, decoded_text, re.MULTILINE)
+    ]
+    if missing or present_forbidden:
+        detail = []
+        if missing:
+            detail.append(f"missing required patterns: {missing}")
+        if present_forbidden:
+            detail.append(f"forbidden patterns present: {present_forbidden}")
+        pytest.fail(f"{label}: " + "; ".join(detail))
+
+
+def _assert_captures(captures, assertions):
+    decoded_text = "\n".join(
+        pathlib.Path(capture["local_decode"]).read_text(errors="replace")
+        for capture in captures
+    )
+    label = ", ".join(f"{capture['host']}:{capture['local_decode'].name}" for capture in captures)
+    _assert_decoded_capture(decoded_text, assertions, label)
 
 
 def _run_packet_capture_check(topology, ssh_user, ssh_key, check):
@@ -178,6 +264,53 @@ def _run_packet_capture_check(topology, ssh_user, ssh_key, check):
 
     for capture in captures:
         _collect_capture(topology, ssh_user, ssh_key, capture)
+    _assert_captures(captures, check.get("assertions", {}))
+
+
+def _segment_capture_assertions(segment, pairs, check):
+    assertions = dict(check.get("assertions", {}))
+    assertions.setdefault("min_packets", 1)
+    assertions.setdefault("vxlan_vni", segment["vni"])
+    inner_ips = set(assertions.get("inner_ips", []))
+    for source, destination in pairs:
+        inner_ips.add(_address(source["ip"]))
+        inner_ips.add(_address(destination["ip"]))
+    assertions["inner_ips"] = sorted(inner_ips)
+    outer_ips = set(assertions.get("outer_ips", []))
+    for vtep in segment.get("vteps", []):
+        outer_ips.add(vtep["underlay_address"])
+    assertions["outer_ips"] = sorted(outer_ips)
+    return assertions
+
+
+def _run_segment_bidirectional_capture_check(topology, ssh_user, ssh_key, check):
+    segment = topology["__resolved__"]["segments"][check["segment"]]
+    captures = []
+    pairs = _check_pairs(segment, check)
+    assertions = _segment_capture_assertions(segment, pairs, check)
+    try:
+        captures = [
+            _start_capture(topology, ssh_user, ssh_key, check["name"], capture)
+            for capture in check["captures"]
+        ]
+        time.sleep(_check_value(check, "settle", 2))
+        for source, destination in pairs:
+            ping_check = {
+                "source": source["host"],
+                "destination": _address(destination["ip"]),
+                "count": _check_value(check, "count", 3),
+                "wait": _check_value(check, "wait", 2),
+                "timeout": _check_value(check, "timeout", 60),
+            }
+            _run_ping_check(topology, ssh_user, ssh_key, ping_check)
+        time.sleep(_check_value(check, "post_trigger_wait", 3))
+    finally:
+        for capture in captures:
+            _stop_capture(capture)
+
+    for capture in captures:
+        _collect_capture(topology, ssh_user, ssh_key, capture)
+    _assert_captures(captures, assertions)
 
 
 def _lua_string(value):
@@ -279,5 +412,7 @@ def test_topology_check(topology, ssh_user, ssh_key, topology_check):
         _run_pktgen_dpdk_check(topology, ssh_user, ssh_key, topology_check)
     elif topology_check["type"] == "segment_ping_matrix":
         _run_segment_ping_matrix_check(topology, ssh_user, ssh_key, topology_check)
+    elif topology_check["type"] == "segment_bidirectional_capture":
+        _run_segment_bidirectional_capture_check(topology, ssh_user, ssh_key, topology_check)
     else:
         pytest.fail(f"unsupported topology check type: {topology_check['type']}")
