@@ -35,6 +35,13 @@ def read_text(path: pathlib.Path, limit: int = MAX_LOG_CHARS) -> str:
     return data[-limit:]
 
 
+def read_json(path: pathlib.Path) -> dict:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
 def redact(text: str) -> str:
     # Keep this conservative: strip obvious private key blocks and common token lines.
     text = re.sub(
@@ -86,8 +93,100 @@ def parse_junit_file(path: pathlib.Path) -> dict:
     return result
 
 
+def topology_summary(topology: dict) -> dict:
+    if not topology:
+        return {}
+
+    hosts = []
+    for host_name, host in sorted(topology.get("hosts", {}).items()):
+        hosts.append(
+            {
+                "name": host_name,
+                "groups": host.get("groups", []),
+                "management_ip": host.get("management_ip", ""),
+                "nics": [
+                    {
+                        "name": nic.get("name", ""),
+                        "network": nic.get("network", ""),
+                        "bridge": nic.get("bridge", ""),
+                        "management": bool(nic.get("management", False)),
+                    }
+                    for nic in host.get("nics", [])
+                ],
+            }
+        )
+
+    networks = {}
+    for name, network in sorted(topology.get("networks", {}).items()):
+        networks[name] = {
+            key: network.get(key, "")
+            for key in ("mode", "vnet", "inner_vlan", "bridge")
+            if key in network
+        }
+
+    segments = {}
+    for name, segment in sorted(topology.get("segments", {}).items()):
+        segments[name] = {
+            key: segment.get(key)
+            for key in ("vni", "vlan")
+            if key in segment
+        }
+        segments[name]["vteps"] = [
+            {
+                "host": vtep.get("host", ""),
+                "underlay_nic": vtep.get("underlay_nic", ""),
+                "underlay_ip": vtep.get("underlay_ip", ""),
+                "local_nics": vtep.get("local_nics", []),
+            }
+            for vtep in segment.get("vteps", [])
+        ]
+        segments[name]["members"] = [
+            {
+                key: member.get(key)
+                for key in ("host", "nic", "mode", "vlan", "ip")
+                if key in member
+            }
+            for member in segment.get("members", [])
+        ]
+
+    checks = []
+    for check in topology.get("checks", []):
+        item = {
+            key: check.get(key)
+            for key in ("name", "type", "segment", "source", "destination")
+            if key in check
+        }
+        if "trigger" in check:
+            item["trigger"] = {
+                key: check["trigger"].get(key)
+                for key in ("type", "source", "destination")
+                if key in check["trigger"]
+            }
+        if "captures" in check:
+            item["captures"] = [
+                {
+                    key: capture.get(key)
+                    for key in ("host", "nic", "filter")
+                    if key in capture
+                }
+                for capture in check["captures"]
+            ]
+        checks.append(item)
+
+    return {
+        "name": topology.get("name", ""),
+        "description": topology.get("description", ""),
+        "network_mode": topology.get("network_mode", ""),
+        "hosts": hosts,
+        "networks": networks,
+        "segments": segments,
+        "checks": checks,
+    }
+
+
 def collect_inputs() -> dict:
     ARTIFACTS.mkdir(parents=True, exist_ok=True)
+    topology = topology_summary(read_json(ARTIFACTS / "topology.json"))
     junit = [parse_junit_file(path) for path in sorted(JUNIT.glob("*.xml"))]
     log_samples = {}
     for path in sorted(LOGS.glob("*.log")):
@@ -112,6 +211,7 @@ def collect_inputs() -> dict:
             "scenario": os.environ.get("SCENARIO", ""),
             "runner_name": os.environ.get("RUNNER_NAME", ""),
         },
+        "topology": topology,
         "topology_env": redact(read_text(ARTIFACTS / "topology.env", limit=12000)),
         "artifact_text": existing_artifacts,
         "junit": junit,
@@ -125,6 +225,9 @@ def local_summary(data: dict) -> str:
     run = data["run"]
     lines.append(f"- Scenario: `{run.get('scenario') or 'unknown'}`")
     lines.append(f"- GitHub run: `{run.get('github_run_id') or 'local'}`")
+    topology = data.get("topology", {})
+    if topology:
+        lines.append(f"- Topology: `{topology.get('name') or 'unknown'}`")
 
     totals = {"tests": 0, "failures": 0, "errors": 0, "skipped": 0}
     failed_cases = []
@@ -158,20 +261,18 @@ def gemini_prompt(data: dict) -> str:
         "the strongest evidence, missing evidence, and concrete next debugging "
         "steps. Be concise and do not invent facts not present in the artifact "
         "summary.\n\n"
-        "Treat this expected topology as authoritative:\n"
-        "- client-a has management net0 and left-l2 dataplane net1.\n"
-        "- vtep-a has management net0, left-l2 net1, and underlay net2.\n"
-        "- vtep-b has management net0, underlay net1, and right-l2 net2.\n"
-        "- client-b has management net0 and right-l2 dataplane net1.\n"
-        "- Expected dataplane IPs are client-a 10.10.0.1/24, client-b "
-        "10.10.0.2/24, vtep-a underlay 172.16.100.1/30, and vtep-b "
-        "underlay 172.16.100.2/30.\n"
-        "Do not report vtep-b underlay on net1 or its resolved guest interface "
-        "as a misconfiguration; that is expected. If JUnit reports zero "
-        "failures and pcap files are present and non-empty, state that the run "
-        "appears successful and only list low-confidence observations under a "
-        "separate caveats section. Keep the response under 800 words and end "
-        "with a complete sentence.\n\n"
+        "Use the `topology` object derived from artifacts/topology.json as the "
+        "authoritative expected topology when it is present. Do not compare the "
+        "run to any fixed two-node or two-VTEP reference layout unless that is "
+        "the topology named in the artifact summary. Treat segment member IPs, "
+        "VLANs, VTEPs, local NICs, and checks from that topology object as "
+        "intentional configuration. If topology data is absent, avoid "
+        "topology-specific misconfiguration claims and ask for the missing "
+        "topology artifact instead. If JUnit reports zero failures and pcap "
+        "files are present and non-empty, state that the run appears successful "
+        "and only list low-confidence observations under a separate caveats "
+        "section. Keep the response under 800 words and end with a complete "
+        "sentence.\n\n"
         f"Artifact summary JSON:\n{json.dumps(data, indent=2)[:50000]}"
     )
 
