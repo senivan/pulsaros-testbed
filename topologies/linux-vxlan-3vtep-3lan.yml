@@ -1,0 +1,402 @@
+schema_version: 1
+name: linux-vxlan-3vtep-3lan
+description: Three-VTEP static VXLAN mesh with access and trunk client LANs.
+
+networks:
+  underlay:
+    mode: access
+    vnet_prefix: pu
+    inner_vlan: 102
+    legacy_vlan_offset: 2
+  red-a:
+    mode: access
+    vnet_prefix: ra
+    inner_vlan: 111
+    legacy_vlan_offset: 11
+  red-b:
+    mode: access
+    vnet_prefix: rb
+    inner_vlan: 112
+    legacy_vlan_offset: 12
+  red-c:
+    mode: access
+    vnet_prefix: rc
+    inner_vlan: 113
+    legacy_vlan_offset: 13
+  blue-a:
+    mode: access
+    vnet_prefix: ba
+    inner_vlan: 121
+    legacy_vlan_offset: 21
+  blue-b:
+    mode: access
+    vnet_prefix: bb
+    inner_vlan: 122
+    legacy_vlan_offset: 22
+  blue-c:
+    mode: access
+    vnet_prefix: bc
+    inner_vlan: 123
+    legacy_vlan_offset: 23
+  green-a:
+    mode: trunk
+    vnet_prefix: ga
+    inner_vlan: 131
+    legacy_vlan_offset: 31
+  green-b:
+    mode: trunk
+    vnet_prefix: gb
+    inner_vlan: 132
+    legacy_vlan_offset: 32
+  green-c:
+    mode: trunk
+    vnet_prefix: gc
+    inner_vlan: 133
+    legacy_vlan_offset: 33
+
+hosts:
+  vtep-a:
+    vmid_offset: 1
+    groups:
+      - vteps
+    nics:
+      - name: mgmt
+        network: management
+        mac_offset: 1
+        management: true
+      - name: underlay
+        network: underlay
+        mac_offset: 21
+      - name: red
+        network: red-a
+        mac_offset: 31
+      - name: blue
+        network: blue-a
+        mac_offset: 41
+      - name: green
+        network: green-a
+        mac_offset: 51
+
+  vtep-b:
+    vmid_offset: 2
+    groups:
+      - vteps
+    nics:
+      - name: mgmt
+        network: management
+        mac_offset: 2
+        management: true
+      - name: underlay
+        network: underlay
+        mac_offset: 22
+      - name: red
+        network: red-b
+        mac_offset: 32
+      - name: blue
+        network: blue-b
+        mac_offset: 42
+      - name: green
+        network: green-b
+        mac_offset: 52
+
+  vtep-c:
+    vmid_offset: 3
+    groups:
+      - vteps
+    nics:
+      - name: mgmt
+        network: management
+        mac_offset: 3
+        management: true
+      - name: underlay
+        network: underlay
+        mac_offset: 23
+      - name: red
+        network: red-c
+        mac_offset: 33
+      - name: blue
+        network: blue-c
+        mac_offset: 43
+      - name: green
+        network: green-c
+        mac_offset: 53
+
+  red-client-a:
+    vmid_offset: 11
+    groups:
+      - clients
+    nics:
+      - name: mgmt
+        network: management
+        mac_offset: 101
+        management: true
+      - name: data
+        network: red-a
+        mac_offset: 111
+
+  red-client-b:
+    vmid_offset: 12
+    groups:
+      - clients
+    nics:
+      - name: mgmt
+        network: management
+        mac_offset: 102
+        management: true
+      - name: data
+        network: red-b
+        mac_offset: 112
+
+  red-client-c:
+    vmid_offset: 13
+    groups:
+      - clients
+    nics:
+      - name: mgmt
+        network: management
+        mac_offset: 103
+        management: true
+      - name: data
+        network: red-c
+        mac_offset: 113
+
+  trunk-client-a:
+    vmid_offset: 31
+    groups:
+      - clients
+    nics:
+      - name: mgmt
+        network: management
+        mac_offset: 121
+        management: true
+      - name: data
+        network: green-a
+        mac_offset: 131
+
+  trunk-client-b:
+    vmid_offset: 32
+    groups:
+      - clients
+    nics:
+      - name: mgmt
+        network: management
+        mac_offset: 122
+        management: true
+      - name: data
+        network: green-b
+        mac_offset: 132
+
+  trunk-client-c:
+    vmid_offset: 33
+    groups:
+      - clients
+    nics:
+      - name: mgmt
+        network: management
+        mac_offset: 123
+        management: true
+      - name: data
+        network: green-c
+        mac_offset: 133
+
+  blue-client-a:
+    vmid_offset: 21
+    groups:
+      - clients
+    nics:
+      - name: mgmt
+        network: management
+        mac_offset: 141
+        management: true
+      - name: data
+        network: blue-a
+        mac_offset: 151
+
+  blue-client-b:
+    vmid_offset: 22
+    groups:
+      - clients
+    nics:
+      - name: mgmt
+        network: management
+        mac_offset: 142
+        management: true
+      - name: data
+        network: blue-b
+        mac_offset: 152
+
+  blue-client-c:
+    vmid_offset: 23
+    groups:
+      - clients
+    nics:
+      - name: mgmt
+        network: management
+        mac_offset: 143
+        management: true
+      - name: data
+        network: blue-c
+        mac_offset: 153
+
+segments:
+  red:
+    vni: 10100
+    vteps:
+      - host: vtep-a
+        underlay_nic: underlay
+        underlay_ip: 172.16.100.1/24
+        local_nics:
+          - red
+      - host: vtep-b
+        underlay_nic: underlay
+        underlay_ip: 172.16.100.2/24
+        local_nics:
+          - red
+      - host: vtep-c
+        underlay_nic: underlay
+        underlay_ip: 172.16.100.3/24
+        local_nics:
+          - red
+    members:
+      - host: red-client-a
+        nic: data
+        mode: access
+        ip: 10.10.10.11/24
+      - host: red-client-b
+        nic: data
+        mode: access
+        ip: 10.10.10.12/24
+      - host: red-client-c
+        nic: data
+        mode: access
+        ip: 10.10.10.13/24
+
+  blue:
+    vni: 10200
+    vlan: 20
+    vteps:
+      - host: vtep-a
+        underlay_nic: underlay
+        underlay_ip: 172.16.100.1/24
+        local_nics:
+          - blue
+      - host: vtep-b
+        underlay_nic: underlay
+        underlay_ip: 172.16.100.2/24
+        local_nics:
+          - blue
+      - host: vtep-c
+        underlay_nic: underlay
+        underlay_ip: 172.16.100.3/24
+        local_nics:
+          - blue
+    members:
+      - host: blue-client-a
+        nic: data
+        mode: access
+        ip: 10.10.20.11/24
+      - host: blue-client-b
+        nic: data
+        mode: access
+        ip: 10.10.20.12/24
+      - host: blue-client-c
+        nic: data
+        mode: access
+        ip: 10.10.20.13/24
+
+  green:
+    vni: 10300
+    vlan: 30
+    vteps:
+      - host: vtep-a
+        underlay_nic: underlay
+        underlay_ip: 172.16.100.1/24
+        local_nics:
+          - green
+      - host: vtep-b
+        underlay_nic: underlay
+        underlay_ip: 172.16.100.2/24
+        local_nics:
+          - green
+      - host: vtep-c
+        underlay_nic: underlay
+        underlay_ip: 172.16.100.3/24
+        local_nics:
+          - green
+    members:
+      - host: trunk-client-a
+        nic: data
+        mode: trunk
+        vlan: 30
+        ip: 10.10.30.11/24
+      - host: trunk-client-b
+        nic: data
+        mode: trunk
+        vlan: 30
+        ip: 10.10.30.12/24
+      - host: trunk-client-c
+        nic: data
+        mode: trunk
+        vlan: 30
+        ip: 10.10.30.13/24
+
+plays:
+  - name: Provision all testbed VMs
+    hosts: all
+    become: true
+    roles:
+      - common
+      - kernel
+  - name: Provision VTEP dataplane prerequisites
+    hosts: vteps
+    become: true
+    roles:
+      - hugepages
+      - dpdk
+  - name: Configure static multi-VTEP VXLAN topology
+    hosts: all
+    become: true
+    roles:
+      - vxlan-test
+
+checks:
+  - name: red-lan-ping-matrix
+    type: segment_ping_matrix
+    segment: red
+    count: 3
+    wait: 2
+    timeout: 45
+
+  - name: green-trunk-ping-matrix
+    type: segment_ping_matrix
+    segment: green
+    count: 3
+    wait: 2
+    timeout: 45
+
+  - name: blue-lan-ping-matrix
+    type: segment_ping_matrix
+    segment: blue
+    count: 3
+    wait: 2
+    timeout: 45
+
+  - name: red-vxlan-underlay-capture
+    type: packet_capture
+    captures:
+      - host: vtep-a
+        nic: underlay
+        filter: udp port 4789
+      - host: vtep-b
+        nic: underlay
+        filter: udp port 4789
+      - host: vtep-c
+        nic: underlay
+        filter: udp port 4789
+    trigger:
+      type: ping
+      source: red-client-a
+      destination: 10.10.10.12
+      count: 5
+      wait: 2
+      timeout: 45

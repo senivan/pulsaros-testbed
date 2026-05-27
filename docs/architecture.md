@@ -44,6 +44,12 @@ JSON and the topology-declared `checks:` section instead of hard-coding host
 names. The generic topology check runner supports ping checks, tcpdump-backed
 packet capture checks, and client-side `pktgen_dpdk` traffic generation checks.
 
+Topologies may also declare `segments` for topology-driven Linux VXLAN
+configuration. Each segment defines one VNI, participating VTEPs, local VTEP
+LAN NICs, and access or trunk client members. The `vxlan-test` Ansible role
+reads the resolved topology JSON and configures static VXLAN flood entries
+between all VTEPs in a segment.
+
 The GitHub runner does not host the test workload. It only calls Proxmox tools,
 runs Ansible over SSH, invokes pytest, and uploads artifacts.
 

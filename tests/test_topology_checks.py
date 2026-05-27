@@ -1,4 +1,5 @@
 import json
+import ipaddress
 import pathlib
 import re
 import shlex
@@ -47,6 +48,43 @@ def _run_ping_check(topology, ssh_user, ssh_key, check):
         command,
         timeout=_check_value(check, "timeout", 60),
     )
+
+
+def _address(cidr):
+    return str(ipaddress.ip_interface(str(cidr)).ip)
+
+
+def _run_segment_ping_matrix_check(topology, ssh_user, ssh_key, check):
+    segment = topology["__resolved__"]["segments"][check["segment"]]
+    members = {
+        f"{member['host']}.{member['nic']}": member
+        for member in segment.get("members", [])
+    }
+    if check.get("pairs"):
+        pairs = [
+            (members[pair["source"]], members[pair["destination"]])
+            for pair in check["pairs"]
+        ]
+    else:
+        pairs = [
+            (source, destination)
+            for source in segment.get("members", [])
+            for destination in segment.get("members", [])
+            if source["host"] != destination["host"] or source["nic"] != destination["nic"]
+        ]
+
+    count = _check_value(check, "count", 3)
+    wait = _check_value(check, "wait", 2)
+    timeout = _check_value(check, "timeout", 60)
+    for source, destination in pairs:
+        ping_check = {
+            "source": source["host"],
+            "destination": _address(destination["ip"]),
+            "count": count,
+            "wait": wait,
+            "timeout": timeout,
+        }
+        _run_ping_check(topology, ssh_user, ssh_key, ping_check)
 
 
 def _pcap_name(check_name, capture):
@@ -239,5 +277,7 @@ def test_topology_check(topology, ssh_user, ssh_key, topology_check):
         _run_packet_capture_check(topology, ssh_user, ssh_key, topology_check)
     elif topology_check["type"] == "pktgen_dpdk":
         _run_pktgen_dpdk_check(topology, ssh_user, ssh_key, topology_check)
+    elif topology_check["type"] == "segment_ping_matrix":
+        _run_segment_ping_matrix_check(topology, ssh_user, ssh_key, topology_check)
     else:
         pytest.fail(f"unsupported topology check type: {topology_check['type']}")

@@ -118,6 +118,8 @@ Topology YAML declares:
 
 - Logical networks and their generated VNet prefixes.
 - Hosts, VMID offsets, groups, and NICs.
+- Optional VXLAN `segments` that bind client LAN members to static multi-VTEP
+  meshes.
 - Ansible host variables.
 - The generated playbook roles.
 - Scenario acceptance checks such as pings and packet captures.
@@ -134,8 +136,13 @@ The create step renders `artifacts/topology.json`, `artifacts/topology.env`,
 
 Topology-specific tests should be declared in the topology `checks:` section.
 The generic pytest executor currently supports `ping`, `packet_capture`, and
-`pktgen_dpdk` checks, so new topologies do not need new fixed-host pytest
+`pktgen_dpdk` checks, plus `segment_ping_matrix` checks for topology-declared
+client LAN segments, so new topologies do not need new fixed-host pytest
 modules for basic connectivity and traffic generation validation.
+
+The sample `linux-vxlan-3vtep-3lan` topology exercises a static three-VTEP
+VXLAN mesh with three client LAN segments. It includes access clients and trunk
+clients with guest VLAN subinterfaces.
 
 ## GitHub Actions Run
 
