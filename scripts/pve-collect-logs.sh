@@ -25,6 +25,9 @@ fi
 # shellcheck disable=SC1091
 source artifacts/topology.env
 [[ "${RUN_ID:-}" == "$REQUESTED_RUN_ID" ]] || die "topology RUN_ID does not match requested RUN_ID"
+if [[ -f artifacts/topology.json || -f artifacts/run-state.json ]]; then
+  ./scripts/run-state.py phase collect-logs --status started --run-id "$RUN_ID" || true
+fi
 
 SSH_USER="${ANSIBLE_USER:-pulsar}"
 SSH_KEY="${ANSIBLE_SSH_PRIVATE_KEY_FILE:-$HOME/.ssh/pulsaros-testbed}"
@@ -68,6 +71,25 @@ collect_pve_serial() {
       timeout 8 sudo -n qm terminal "$vmid" > "logs/${host}-serial-console.log" 2>&1 || warn "failed to collect Proxmox serial console from $host"
     fi
   fi
+}
+
+collect_sdn_state() {
+  [[ "${NETWORK_MODE:-bridge}" == "qinq" ]] || return 0
+  [[ -f artifacts/topology.json ]] || return 0
+  local zone
+  zone=$(jq -r '.qinq.zone // ""' artifacts/topology.json)
+  if [[ -n "$zone" ]]; then
+    log "Collecting Proxmox SDN zone $zone"
+    run_pve pvesh get "/cluster/sdn/zones/$zone" > "logs/sdn-zone-${zone}.log" 2>&1 || warn "failed to collect SDN zone $zone"
+  fi
+  while IFS= read -r vnet; do
+    [[ -n "$vnet" ]] || continue
+    log "Collecting Proxmox SDN VNet $vnet"
+    run_pve pvesh get "/cluster/sdn/vnets/$vnet" > "logs/sdn-vnet-${vnet}.log" 2>&1 || warn "failed to collect SDN VNet $vnet"
+    if [[ -d "/sys/class/net/$vnet" ]]; then
+      ip -d link show "$vnet" > "logs/sdn-link-${vnet}.log" 2>&1 || warn "failed to collect link state for $vnet"
+    fi
+  done < <(jq -r '.networks[] | select(.vnet != "") | .vnet' artifacts/topology.json)
 }
 
 copy_pcap() {
@@ -135,6 +157,7 @@ else
 fi
 
 log "Collecting from ${#host_entries[@]} topology hosts"
+collect_sdn_state
 for entry in "${host_entries[@]}"; do
   [[ -n "$entry" ]] || continue
   host=$(printf '%s' "$entry" | base64 -d | jq -r '.name')
@@ -165,4 +188,7 @@ if [[ -n "${VTEP_B_IP:-}" ]]; then
   copy_pcap vtep-b "${VTEP_B_IP:-}" /tmp/pulsaros-testbed/vtep-b-underlay.pcap pcaps/vtep-b-underlay.pcap
 fi
 
+if [[ -f artifacts/topology.json || -f artifacts/run-state.json ]]; then
+  ./scripts/run-state.py phase collect-logs --status completed --run-id "$RUN_ID" || true
+fi
 log "Collection complete"

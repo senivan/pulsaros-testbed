@@ -26,6 +26,12 @@ sdn_apply() {
 RUN_ID="${1:-}"
 [[ "$RUN_ID" =~ ^[0-9]+$ ]] || die "usage: $0 RUN_ID"
 REQUESTED_RUN_ID="$RUN_ID"
+state_cmd() {
+  if [[ -f artifacts/topology.json || -f artifacts/run-state.json ]]; then
+    ./scripts/run-state.py "$@" --run-id "$REQUESTED_RUN_ID" || true
+  fi
+}
+state_cmd phase destroy --status started
 
 if [[ -f artifacts/topology.env ]]; then
   # shellcheck disable=SC1091
@@ -44,31 +50,34 @@ elif [[ ! -f artifacts/topology.json ]]; then
 fi
 
 destroy_one() {
-  local vmid="$1" expected_name="$2" actual_name
+  local host="$1" vmid="$2" expected_name="$3" actual_name
   if ! run_pve qm status "$vmid" >/dev/null 2>&1; then
     log "VMID $vmid missing; skipping"
+    state_cmd vm "$host" missing
     return 0
   fi
   actual_name=$(run_pve qm config "$vmid" | awk -F': ' '/^name:/ {print $2}')
   if [[ "$actual_name" != "$expected_name" ]]; then
     warn "VMID $vmid name is $actual_name, expected $expected_name; refusing to destroy"
-    return 0
+    state_cmd phase destroy --status unsafe --message "VMID $vmid name mismatch: $actual_name != $expected_name"
+    die "unsafe VMID name mismatch for $vmid"
   fi
   log "Stopping $expected_name ($vmid)"
   run_pve qm stop "$vmid" --skiplock 1 || true
   log "Destroying $expected_name ($vmid)"
   run_pve qm destroy "$vmid" --purge 1 || true
+  state_cmd vm "$host" destroyed
 }
 
 if [[ -f artifacts/topology.json ]]; then
-  while IFS=$'\t' read -r vmid vm_name; do
-    destroy_one "$vmid" "$vm_name"
-  done < <(jq -r '.hosts[] | [.vmid, .vm_name] | @tsv' artifacts/topology.json)
+  while IFS=$'\t' read -r host vmid vm_name; do
+    destroy_one "$host" "$vmid" "$vm_name"
+  done < <(jq -r '.hosts[] | [.name, .vmid, .vm_name] | @tsv' artifacts/topology.json)
 else
-  destroy_one "$CLIENT_A" "$CLIENT_A_NAME"
-  destroy_one "$VTEP_A" "$VTEP_A_NAME"
-  destroy_one "$VTEP_B" "$VTEP_B_NAME"
-  destroy_one "$CLIENT_B" "$CLIENT_B_NAME"
+  destroy_one client-a "$CLIENT_A" "$CLIENT_A_NAME"
+  destroy_one vtep-a "$VTEP_A" "$VTEP_A_NAME"
+  destroy_one vtep-b "$VTEP_B" "$VTEP_B_NAME"
+  destroy_one client-b "$CLIENT_B" "$CLIENT_B_NAME"
 fi
 
 if [[ "${NETWORK_MODE:-bridge}" == "qinq" ]]; then
@@ -77,6 +86,7 @@ if [[ "${NETWORK_MODE:-bridge}" == "qinq" ]]; then
     while IFS= read -r vnet; do
       sdn_name_is_generated "$vnet" || die "refusing to delete unexpected SDN VNet name: $vnet"
       run_pve pvesh delete "/cluster/sdn/vnets/$vnet" || true
+      state_cmd sdn vnet "$vnet" deleted
     done < <(jq -r '.networks[] | select(.vnet != "") | .vnet' artifacts/topology.json)
     zone=$(jq -r '.qinq.zone' artifacts/topology.json)
   else
@@ -92,7 +102,9 @@ if [[ "${NETWORK_MODE:-bridge}" == "qinq" ]]; then
   log "Deleting generated QinQ SDN zone $zone"
   sdn_name_is_generated "$zone" || die "refusing to delete unexpected SDN zone name: $zone"
   run_pve pvesh delete "/cluster/sdn/zones/$zone" || true
+  state_cmd sdn zone "$zone" deleted
   sdn_apply || warn "SDN apply failed after deletion"
 fi
 
+state_cmd phase destroy --status completed
 log "Destroy complete"

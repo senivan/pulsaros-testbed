@@ -620,6 +620,18 @@ def cmd_render(args):
     write_env(data)
 
 
+def cmd_validate(args):
+    os.environ.setdefault("RUN_ID", "1")
+    os.environ.setdefault("NETWORK_MODE", "qinq")
+    os.environ.setdefault("MGMT_BRIDGE", "vmbr0")
+    os.environ.setdefault("SDN_BRIDGE", "vmbr-test")
+    os.environ.setdefault("TEST_BRIDGE", "vmbr-test")
+    os.environ.setdefault("QINQ_SERVICE_VLAN_BASE", "3000")
+    os.environ.setdefault("QINQ_SERVICE_VLAN_COUNT", "500")
+    render(args.topology_file)
+    print(f"render-topology: validated {args.topology_file}")
+
+
 def cmd_update_ips(args):
     data = load_resolved()
     for item in args.host_ip:
@@ -648,6 +660,9 @@ def main():
     render_parser = sub.add_parser("render")
     render_parser.add_argument("--topology-file", required=True)
     render_parser.set_defaults(func=cmd_render)
+    validate_parser = sub.add_parser("validate")
+    validate_parser.add_argument("--topology-file", required=True)
+    validate_parser.set_defaults(func=cmd_validate)
     update_parser = sub.add_parser("update-ips")
     update_parser.add_argument("host_ip", nargs="+")
     update_parser.set_defaults(func=cmd_update_ips)

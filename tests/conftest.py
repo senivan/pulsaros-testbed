@@ -155,6 +155,7 @@ def iface_by_mac(topology, ssh_user, ssh_key, host, mac):
         "set -eu; "
         f"mac={shlex.quote(mac.lower())}; "
         "for dev in /sys/class/net/*; do "
+        'case "$(basename "$dev")" in *.*) continue ;; esac; '
         '[ "$(cat "$dev/address")" = "$mac" ] && basename "$dev" && exit 0; '
         "done; exit 1"
     )

@@ -52,6 +52,23 @@ def test_default_topology_renders_legacy_compat(monkeypatch):
     assert data["segments"]["default-lan"]["vteps"][0]["underlay_address"] == "172.16.100.1"
 
 
+def test_validate_command_does_not_require_run_environment(monkeypatch, capsys):
+    for name in (
+        "RUN_ID",
+        "NETWORK_MODE",
+        "MGMT_BRIDGE",
+        "SDN_BRIDGE",
+        "TEST_BRIDGE",
+        "QINQ_SERVICE_VLAN_BASE",
+        "QINQ_SERVICE_VLAN_COUNT",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    render_topology.cmd_validate(type("Args", (), {"topology_file": TOPOLOGY})())
+
+    assert "validated" in capsys.readouterr().out
+
+
 def test_default_topology_resolves_ansible_vars(monkeypatch):
     base_env(monkeypatch)
     data = render_topology.render(TOPOLOGY)
