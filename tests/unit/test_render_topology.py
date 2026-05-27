@@ -9,6 +9,7 @@ import pytest
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 MODULE_PATH = ROOT / "scripts" / "render-topology.py"
 TOPOLOGY = ROOT / "topologies" / "linux-vxlan-reference.yml"
+MULTI_VTEP_TOPOLOGY = ROOT / "topologies" / "linux-vxlan-3vtep-3lan.yml"
 
 
 spec = importlib.util.spec_from_file_location("render_topology", MODULE_PATH)
@@ -47,6 +48,8 @@ def test_default_topology_renders_legacy_compat(monkeypatch):
     assert data["checks"][1]["captures"][0]["nic"] == "underlay"
     assert data["checks"][2]["name"] == "pktgen-client-a-to-b"
     assert data["checks"][2]["destination_mac"] == data["hosts"]["client-b"]["nics"][1]["mac"]
+    assert data["segments"]["default-lan"]["vni"] == 100
+    assert data["segments"]["default-lan"]["vteps"][0]["underlay_address"] == "172.16.100.1"
 
 
 def test_default_topology_resolves_ansible_vars(monkeypatch):
@@ -78,36 +81,61 @@ def test_bridge_mode_uses_legacy_vlan_tags(monkeypatch):
     assert "qinq" not in data
 
 
-def write_topology(tmp_path, checks):
+def test_multi_vtep_topology_renders_segments(monkeypatch):
+    base_env(monkeypatch)
+
+    data = render_topology.render(MULTI_VTEP_TOPOLOGY)
+
+    assert sorted(data["segments"]) == ["blue", "green", "red"]
+    assert len(data["segments"]["red"]["vteps"]) == 3
+    assert len(data["segments"]["red"]["members"]) == 3
+    assert data["segments"]["green"]["members"][0]["mode"] == "trunk"
+    assert data["segments"]["green"]["members"][0]["vlan"] == 30
+    assert data["segments"]["red"]["vteps"][2]["underlay_address"] == "172.16.100.3"
+    assert data["checks"][0]["type"] == "segment_ping_matrix"
+
+
+def write_topology(tmp_path, checks, extra=""):
     path = tmp_path / "topology.yml"
-    path.write_text(
-        textwrap.dedent(
-            f"""
-            schema_version: 1
-            name: bad-checks
-            networks:
-              dataplane:
-                mode: access
-                vnet_prefix: pd
-                inner_vlan: 101
-            hosts:
-              host-a:
-                vmid_offset: 1
-                groups: []
-                nics:
-                  - name: mgmt
-                    network: management
-                    mac_offset: 1
-                    management: true
-                  - name: data
-                    network: dataplane
-                    mac_offset: 11
-            checks:
-            {checks}
-            """
-        ),
-        encoding="utf-8",
+    base = textwrap.dedent(
+        """
+        schema_version: 1
+        name: bad-checks
+        networks:
+          dataplane:
+            mode: access
+            vnet_prefix: pd
+            inner_vlan: 101
+        hosts:
+          host-a:
+            vmid_offset: 1
+            groups: []
+            nics:
+              - name: mgmt
+                network: management
+                mac_offset: 1
+                management: true
+              - name: data
+                network: dataplane
+                mac_offset: 11
+          host-b:
+            vmid_offset: 2
+            groups: []
+            nics:
+              - name: mgmt
+                network: management
+                mac_offset: 2
+                management: true
+              - name: data
+                network: dataplane
+                mac_offset: 12
+        """
     )
+    content = base
+    if extra:
+        content += textwrap.dedent(extra).strip() + "\n"
+    content += "checks:\n" + checks + "\n"
+    path.write_text(content, encoding="utf-8")
     return path
 
 
@@ -199,6 +227,78 @@ def test_pktgen_dpdk_rejects_cidr_source_ip(monkeypatch, tmp_path):
                 """
             ).strip(),
             "  ",
+        ),
+    )
+
+    with pytest.raises(SystemExit):
+        render_topology.render(topology)
+
+
+def test_segment_rejects_duplicate_vni(monkeypatch, tmp_path):
+    base_env(monkeypatch)
+    topology = write_topology(
+        tmp_path,
+        "  []",
+        textwrap.indent(
+            textwrap.dedent(
+                """
+                segments:
+                  first:
+                    vni: 100
+                    vteps:
+                      - host: host-a
+                        underlay_nic: data
+                        underlay_ip: 172.16.0.1/24
+                      - host: host-b
+                        underlay_nic: data
+                        underlay_ip: 172.16.0.2/24
+                    members: []
+                  second:
+                    vni: 100
+                    vteps:
+                      - host: host-a
+                        underlay_nic: data
+                        underlay_ip: 172.16.0.1/24
+                      - host: host-b
+                        underlay_nic: data
+                        underlay_ip: 172.16.0.2/24
+                    members: []
+                """
+            ).strip(),
+            "            ",
+        ),
+    )
+
+    with pytest.raises(SystemExit):
+        render_topology.render(topology)
+
+
+def test_segment_trunk_member_requires_vlan(monkeypatch, tmp_path):
+    base_env(monkeypatch)
+    topology = write_topology(
+        tmp_path,
+        "  []",
+        textwrap.indent(
+            textwrap.dedent(
+                """
+                segments:
+                  trunk:
+                    vni: 100
+                    vteps:
+                      - host: host-a
+                        underlay_nic: data
+                        underlay_ip: 172.16.0.1/24
+                      - host: host-b
+                        underlay_nic: data
+                        underlay_ip: 172.16.0.2/24
+                    members:
+                      - host: host-a
+                        nic: data
+                        mode: trunk
+                        ip: 10.10.0.1/24
+                """
+            ).strip(),
+            "            ",
         ),
     )
 

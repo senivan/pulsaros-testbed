@@ -18,99 +18,152 @@
     executable: /bin/bash
   changed_when: true
 
-- name: Resolve client dataplane interface by MAC
-  ansible.builtin.shell: |
-    set -euo pipefail
-    for dev in /sys/class/net/*; do
-      if [ "$(cat "$dev/address")" = "{{ dataplane_mac | lower }}" ]; then
-        basename "$dev"
-        exit 0
-      fi
-    done
-    exit 1
-  args:
-    executable: /bin/bash
-  register: client_dataplane_if
-  changed_when: false
-  when: "'clients' in group_names"
+- name: Copy resolved topology to guest
+  ansible.builtin.copy:
+    content: "{{ lookup('ansible.builtin.file', playbook_dir + '/../artifacts/topology.json') }}"
+    dest: /tmp/pulsaros-testbed-topology.json
+    mode: "0644"
 
-- name: Configure client dataplane interface
+- name: Configure topology-declared client LANs and static VXLAN segments
   ansible.builtin.shell: |
     set -euo pipefail
-    if command -v nmcli >/dev/null 2>&1; then
-      nmcli device set "{{ client_dataplane_if.stdout }}" managed no || true
-    fi
-    ip link set "{{ client_dataplane_if.stdout }}" nomaster 2>/dev/null || true
-    ip addr flush dev "{{ client_dataplane_if.stdout }}"
-    ip addr replace "{{ dataplane_ip }}" dev "{{ client_dataplane_if.stdout }}"
-    ip link set "{{ client_dataplane_if.stdout }}" up
-    ip neigh replace "{{ peer_ip }}" lladdr "{{ peer_mac | lower }}" dev "{{ client_dataplane_if.stdout }}" nud permanent
+    python3 - <<'PY'
+    import json
+    import os
+    import subprocess
+    from pathlib import Path
+
+    host_name = os.environ["TOPOLOGY_HOST"]
+    topology = json.loads(Path("/tmp/pulsaros-testbed-topology.json").read_text())
+    segments = topology.get("segments", {})
+
+    def run(*args, check=True):
+        subprocess.run(args, check=check)
+
+    def sh(command, check=True):
+        subprocess.run(["/bin/bash", "-lc", command], check=check)
+
+    def iface_by_mac(mac):
+        wanted = mac.lower()
+        for path in Path("/sys/class/net").iterdir():
+            try:
+                if (path / "address").read_text().strip().lower() == wanted:
+                    return path.name
+            except FileNotFoundError:
+                continue
+        raise SystemExit(f"interface with MAC {mac} not found on {host_name}")
+
+    def disable_nm(dev):
+        sh(f"command -v nmcli >/dev/null 2>&1 && nmcli device set {dev!r} managed no || true")
+
+    def set_up(dev):
+        run("ip", "link", "set", dev, "up")
+
+    def delete_link(dev):
+        run("ip", "link", "del", dev, check=False)
+
+    def prepare_access_interface(dev, cidr):
+        disable_nm(dev)
+        sh(f"ip link set {dev!r} nomaster 2>/dev/null || true")
+        run("ip", "addr", "flush", "dev", dev)
+        run("ip", "addr", "replace", cidr, "dev", dev)
+        set_up(dev)
+
+    def prepare_trunk_interface(dev, vlan, cidr):
+        disable_nm(dev)
+        subif = f"{dev}.{vlan}"
+        sh(f"ip link add link {dev!r} name {subif!r} type vlan id {int(vlan)} 2>/dev/null || true")
+        run("ip", "addr", "flush", "dev", subif)
+        run("ip", "addr", "replace", cidr, "dev", subif)
+        set_up(dev)
+        set_up(subif)
+
+    def configure_clients():
+        for segment in segments.values():
+            for member in segment.get("members", []):
+                if member["host"] != host_name:
+                    continue
+                dev = iface_by_mac(member["mac"])
+                if member.get("mode", "access") == "trunk":
+                    prepare_trunk_interface(dev, member["vlan"], member["ip"])
+                else:
+                    prepare_access_interface(dev, member["ip"])
+
+    def configure_vteps():
+        for segment in segments.values():
+            local = None
+            peers = []
+            for vtep in segment.get("vteps", []):
+                if vtep["host"] == host_name:
+                    local = vtep
+                else:
+                    peers.append(vtep)
+            if not local:
+                continue
+
+            underlay_if = iface_by_mac(local["underlay_mac"])
+            bridge = segment["bridge"]
+            vxlan = segment["vxlan"]
+
+            disable_nm(underlay_if)
+            run("ip", "addr", "replace", local["underlay_ip"], "dev", underlay_if)
+            set_up(underlay_if)
+
+            delete_link(vxlan)
+            delete_link(bridge)
+            run("ip", "link", "add", bridge, "type", "bridge")
+            run("ip", "link", "set", bridge, "type", "bridge", "stp_state", "0", "forward_delay", "0")
+            set_up(bridge)
+
+            for nic in local.get("local_nics", []):
+                dev = iface_by_mac(nic["mac"])
+                disable_nm(dev)
+                sh(f"ip link set {dev!r} nomaster 2>/dev/null || true")
+                run("ip", "addr", "flush", "dev", dev)
+                run("ip", "link", "set", dev, "promisc", "on")
+                set_up(dev)
+                run("ip", "link", "set", dev, "master", bridge)
+
+            run(
+                "ip",
+                "link",
+                "add",
+                vxlan,
+                "type",
+                "vxlan",
+                "id",
+                str(segment["vni"]),
+                "local",
+                local["underlay_address"],
+                "dstport",
+                "4789",
+                "dev",
+                underlay_if,
+                "nolearning",
+            )
+            run("ip", "link", "set", vxlan, "promisc", "on")
+            run("ip", "link", "set", vxlan, "master", bridge)
+            set_up(vxlan)
+            for peer in peers:
+                run(
+                    "bridge",
+                    "fdb",
+                    "append",
+                    "00:00:00:00:00:00",
+                    "dev",
+                    vxlan,
+                    "dst",
+                    peer["underlay_address"],
+                    "self",
+                    check=False,
+                )
+            sh(f"bridge fdb show dev {vxlan!r}")
+
+    configure_clients()
+    configure_vteps()
+    PY
   args:
     executable: /bin/bash
+  environment:
+    TOPOLOGY_HOST: "{{ inventory_hostname }}"
   changed_when: true
-  when: "'clients' in group_names"
-
-- name: Resolve VTEP left/right L2 interface by MAC
-  ansible.builtin.shell: |
-    set -euo pipefail
-    mac="{{ left_mac | default(right_mac) | lower }}"
-    for dev in /sys/class/net/*; do
-      if [ "$(cat "$dev/address")" = "$mac" ]; then
-        basename "$dev"
-        exit 0
-      fi
-    done
-    exit 1
-  args:
-    executable: /bin/bash
-  register: vtep_l2_if
-  changed_when: false
-  when: "'vteps' in group_names"
-
-- name: Resolve VTEP underlay interface by MAC
-  ansible.builtin.shell: |
-    set -euo pipefail
-    for dev in /sys/class/net/*; do
-      if [ "$(cat "$dev/address")" = "{{ underlay_mac | lower }}" ]; then
-        basename "$dev"
-        exit 0
-      fi
-    done
-    exit 1
-  args:
-    executable: /bin/bash
-  register: vtep_underlay_if
-  changed_when: false
-  when: "'vteps' in group_names"
-
-- name: Configure VTEP Linux VXLAN reference bridge
-  ansible.builtin.shell: |
-    set -euo pipefail
-    if command -v nmcli >/dev/null 2>&1; then
-      nmcli device set "{{ vtep_l2_if.stdout }}" managed no || true
-      nmcli device set "{{ vtep_underlay_if.stdout }}" managed no || true
-    fi
-    ip link del vxlan100 2>/dev/null || true
-    ip link del br-testbed 2>/dev/null || true
-    ip link set "{{ vtep_l2_if.stdout }}" nomaster 2>/dev/null || true
-    ip link set "{{ vtep_underlay_if.stdout }}" nomaster 2>/dev/null || true
-    ip addr flush dev "{{ vtep_l2_if.stdout }}"
-    ip addr flush dev "{{ vtep_underlay_if.stdout }}"
-    ip addr replace "{{ underlay_ip }}" dev "{{ vtep_underlay_if.stdout }}"
-    ip link set "{{ vtep_l2_if.stdout }}" up
-    ip link set "{{ vtep_underlay_if.stdout }}" up
-    ip link add br-testbed type bridge
-    ip link set br-testbed type bridge stp_state 0 forward_delay 0
-    ip link set br-testbed up
-    ip link set "{{ vtep_l2_if.stdout }}" promisc on
-    ip link set "{{ vtep_l2_if.stdout }}" master br-testbed
-    ip link add vxlan100 type vxlan id 100 local "{{ underlay_ip.split('/')[0] }}" remote "{{ vxlan_remote }}" dstport 4789 dev "{{ vtep_underlay_if.stdout }}"
-    ip link set vxlan100 promisc on
-    ip link set vxlan100 master br-testbed
-    ip link set vxlan100 up
-    bridge fdb append 00:00:00:00:00:00 dev vxlan100 dst "{{ vxlan_remote }}" self 2>/dev/null || true
-    bridge fdb show dev vxlan100
-  args:
-    executable: /bin/bash
-  changed_when: true
-  when: "'vteps' in group_names"

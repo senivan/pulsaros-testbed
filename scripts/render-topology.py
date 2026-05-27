@@ -147,7 +147,189 @@ def validate_pktgen_dpdk_check(hosts, check, label):
         die(f"{label} duration must be at least 1 second")
 
 
-def validate_checks(hosts, checks):
+def validate_vlan(value, label):
+    vlan = int(value)
+    if vlan < 1 or vlan > 4094:
+        die(f"{label} must be between 1 and 4094")
+    return vlan
+
+
+def validate_vni(value, label):
+    vni = int(value)
+    if vni < 1 or vni > 16777215:
+        die(f"{label} must be between 1 and 16777215")
+    return vni
+
+
+def validate_segments(hosts, segments):
+    if segments in (None, {}):
+        return {}
+    if not isinstance(segments, dict):
+        die("segments must be a mapping")
+
+    names = []
+    vnis = []
+    for name, segment in segments.items():
+        label = f"segment {name}"
+        if not isinstance(name, str) or not re.fullmatch(r"[a-z0-9][a-z0-9-]*", name):
+            die(f"invalid segment name: {name}")
+        if not isinstance(segment, dict):
+            die(f"{label} must be a mapping")
+        names.append(name)
+
+        if "vni" not in segment:
+            die(f"{label} must define vni")
+        vni = validate_vni(segment["vni"], f"{label} vni")
+        vnis.append(vni)
+
+        if segment.get("vlan") not in (None, ""):
+            validate_vlan(segment["vlan"], f"{label} vlan")
+
+        vteps = segment.get("vteps")
+        if not isinstance(vteps, list) or len(vteps) < 2:
+            die(f"{label} must define at least two vteps")
+        vtep_hosts = []
+        for index, vtep in enumerate(vteps):
+            vtep_label = f"{label} vtep {index}"
+            if not isinstance(vtep, dict):
+                die(f"{vtep_label} must be a mapping")
+            host = vtep.get("host")
+            underlay_nic = vtep.get("underlay_nic")
+            if not host:
+                die(f"{vtep_label} must define host")
+            if not underlay_nic:
+                die(f"{vtep_label} must define underlay_nic")
+            if not vtep.get("underlay_ip"):
+                die(f"{vtep_label} must define underlay_ip")
+            validate_host_nic_ref(hosts, host, underlay_nic, vtep_label)
+            vtep_hosts.append(host)
+            local_nics = vtep.get("local_nics", [])
+            if local_nics is None:
+                local_nics = []
+            if not isinstance(local_nics, list):
+                die(f"{vtep_label} local_nics must be a list")
+            for nic in local_nics:
+                if nic == underlay_nic:
+                    die(f"{vtep_label} local_nics cannot include underlay_nic")
+                validate_host_nic_ref(hosts, host, nic, f"{vtep_label} local_nics")
+        validate_unique(vtep_hosts, f"{label} vtep host")
+
+        members = segment.get("members", [])
+        if members is None:
+            members = []
+        if not isinstance(members, list):
+            die(f"{label} members must be a list")
+        for index, member in enumerate(members):
+            member_label = f"{label} member {index}"
+            if not isinstance(member, dict):
+                die(f"{member_label} must be a mapping")
+            host = member.get("host")
+            nic = member.get("nic")
+            if not host:
+                die(f"{member_label} must define host")
+            if not nic:
+                die(f"{member_label} must define nic")
+            if not member.get("ip"):
+                die(f"{member_label} must define ip")
+            validate_host_nic_ref(hosts, host, nic, member_label)
+            mode = member.get("mode", "access")
+            if mode not in ("access", "trunk"):
+                die(f"{member_label} mode must be access or trunk")
+            if member.get("vlan") not in (None, ""):
+                validate_vlan(member["vlan"], f"{member_label} vlan")
+            if mode == "trunk" and member.get("vlan") in (None, "") and segment.get("vlan") in (None, ""):
+                die(f"{member_label} trunk mode requires member vlan or segment vlan")
+
+    validate_unique(names, "segment name")
+    validate_unique(vnis, "segment vni")
+    return segments
+
+
+def resolve_segments(hosts, segments):
+    resolved = {}
+    for index, (name, segment) in enumerate(segments.items()):
+        vlan = segment.get("vlan")
+        if vlan not in (None, ""):
+            vlan = int(vlan)
+        vteps = []
+        for vtep in segment.get("vteps", []):
+            host = hosts[vtep["host"]]
+            underlay_nic = nic_by_name(host, vtep["underlay_nic"])
+            local_nics = []
+            for nic_name in vtep.get("local_nics", []) or []:
+                nic = nic_by_name(host, nic_name)
+                local_nics.append(
+                    {
+                        "name": nic_name,
+                        "mac": nic["mac"],
+                        "network": nic["network"],
+                    }
+                )
+            vteps.append(
+                {
+                    "host": vtep["host"],
+                    "underlay_nic": vtep["underlay_nic"],
+                    "underlay_mac": underlay_nic["mac"],
+                    "underlay_ip": str(vtep["underlay_ip"]),
+                    "underlay_address": str(vtep["underlay_ip"]).split("/", 1)[0],
+                    "local_nics": local_nics,
+                }
+            )
+        members = []
+        for member in segment.get("members", []) or []:
+            host = hosts[member["host"]]
+            nic = nic_by_name(host, member["nic"])
+            member_vlan = member.get("vlan", vlan) if member.get("mode", "access") == "trunk" else None
+            if member_vlan not in (None, ""):
+                member_vlan = int(member_vlan)
+            members.append(
+                {
+                    "host": member["host"],
+                    "nic": member["nic"],
+                    "mac": nic["mac"],
+                    "mode": member.get("mode", "access"),
+                    "vlan": member_vlan,
+                    "ip": str(member["ip"]),
+                }
+            )
+        resolved[name] = {
+            "name": name,
+            "vni": int(segment["vni"]),
+            "vlan": vlan,
+            "bridge": f"brs{index}",
+            "vxlan": f"vxs{index}",
+            "vteps": vteps,
+            "members": members,
+        }
+    return resolved
+
+
+def validate_segment_ping_matrix_check(segments, check, label):
+    segment_name = check.get("segment")
+    if not segment_name:
+        die(f"{label} must define segment")
+    if segment_name not in segments:
+        die(f"{label} references unknown segment {segment_name}")
+    if check.get("pairs") in (None, ""):
+        return
+    if not isinstance(check["pairs"], list):
+        die(f"{label} pairs must be a list")
+    segment_members = {
+        f"{member['host']}.{member['nic']}"
+        for member in segments[segment_name].get("members", [])
+    }
+    for index, pair in enumerate(check["pairs"]):
+        pair_label = f"{label} pair {index}"
+        if not isinstance(pair, dict):
+            die(f"{pair_label} must be a mapping")
+        for field in ("source", "destination"):
+            endpoint = pair.get(field)
+            if endpoint not in segment_members:
+                die(f"{pair_label} {field} must reference a segment member as host.nic")
+
+
+def validate_checks(hosts, checks, segments=None):
+    segments = segments or {}
     if checks in (None, []):
         return []
     if not isinstance(checks, list):
@@ -168,6 +350,8 @@ def validate_checks(hosts, checks):
             validate_packet_capture_check(hosts, check, f"check {name}")
         elif check_type == "pktgen_dpdk":
             validate_pktgen_dpdk_check(hosts, check, f"check {name}")
+        elif check_type == "segment_ping_matrix":
+            validate_segment_ping_matrix_check(segments, check, f"check {name}")
         else:
             die(f"check {name} has unsupported type {check_type}")
     validate_unique(names, "check name")
@@ -278,6 +462,7 @@ def render(topology_path, previous=None):
             "management_ip": previous_hosts.get(name, {}).get("management_ip", ""),
         }
     validate_unique(all_mac_offsets, "mac_offset")
+    segments = validate_segments(hosts, source.get("segments", {}))
     resolved = {
         "schema_version": 1,
         "name": source["name"],
@@ -288,6 +473,7 @@ def render(topology_path, previous=None):
         "network_mode": network_mode,
         "networks": networks,
         "hosts": hosts,
+        "segments": resolve_segments(hosts, segments),
         "plays": source.get("plays", []),
         "compat": source.get("compat", {}),
     }
@@ -299,7 +485,7 @@ def render(topology_path, previous=None):
             "mtu": env_int("QINQ_MTU", 1496),
             "ipam": env_str("QINQ_IPAM", "pve"),
         }
-    checks = validate_checks(hosts, source.get("checks", []))
+    checks = validate_checks(hosts, source.get("checks", []), resolved["segments"])
     resolved["checks"] = resolve_tokens(resolved, {}, checks)
     return resolved
 

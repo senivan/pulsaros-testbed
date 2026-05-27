@@ -100,6 +100,30 @@ hosts:
       peer_ip: 10.10.0.1
       peer_mac: "@host:client-a.nic:left.mac"
 
+segments:
+  default-lan:
+    vni: 100
+    vteps:
+      - host: vtep-a
+        underlay_nic: underlay
+        underlay_ip: 172.16.100.1/30
+        local_nics:
+          - left
+      - host: vtep-b
+        underlay_nic: underlay
+        underlay_ip: 172.16.100.2/30
+        local_nics:
+          - right
+    members:
+      - host: client-a
+        nic: left
+        mode: access
+        ip: 10.10.0.1/24
+      - host: client-b
+        nic: right
+        mode: access
+        ip: 10.10.0.2/24
+
 plays:
   - name: Provision all testbed VMs
     hosts: all

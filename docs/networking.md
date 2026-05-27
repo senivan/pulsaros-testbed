@@ -14,6 +14,10 @@ the existing parent bridge.
 
 Topology files define the logical dataplane networks. The renderer maps those
 logical networks to either generated QinQ VNets or legacy bridge VLAN tags.
+VXLAN behavior is described separately with topology `segments`: each segment
+declares the VNI, participating VTEPs, local VTEP LAN NICs, and client members.
+Client members can be untagged access interfaces or trunk members configured as
+guest VLAN subinterfaces.
 
 ## Default QinQ Mode
 
