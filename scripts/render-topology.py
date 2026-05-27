@@ -94,9 +94,7 @@ def validate_ping_check(hosts, check, label):
     validate_host_ref(hosts, source, label)
 
 
-def validate_packet_capture_check(hosts, check, label):
-    captures = check.get("captures")
-    trigger = check.get("trigger")
+def validate_captures(hosts, captures, label):
     if not isinstance(captures, list) or not captures:
         die(f"{label} must define captures")
     for index, capture in enumerate(captures):
@@ -112,6 +110,33 @@ def validate_packet_capture_check(hosts, check, label):
         if not capture.get("filter"):
             die(f"{capture_label} must define filter")
         validate_host_nic_ref(hosts, host, nic, capture_label)
+
+
+def validate_capture_assertions(check, label):
+    assertions = check.get("assertions")
+    if assertions in (None, ""):
+        return
+    if not isinstance(assertions, dict):
+        die(f"{label} assertions must be a mapping")
+    allowed = {"min_packets", "contains", "not_contains", "vxlan_vni", "inner_ips", "outer_ips"}
+    for key in assertions:
+        if key not in allowed:
+            die(f"{label} assertions has unsupported field {key}")
+    if "min_packets" in assertions and int(assertions["min_packets"]) < 1:
+        die(f"{label} assertions min_packets must be at least 1")
+    for field in ("contains", "not_contains", "inner_ips", "outer_ips"):
+        if field not in assertions:
+            continue
+        values = assertions[field]
+        if not isinstance(values, list) or not all(isinstance(value, str) for value in values):
+            die(f"{label} assertions {field} must be a list of strings")
+
+
+def validate_packet_capture_check(hosts, check, label):
+    captures = check.get("captures")
+    trigger = check.get("trigger")
+    validate_captures(hosts, captures, label)
+    validate_capture_assertions(check, label)
     if not isinstance(trigger, dict):
         die(f"{label} must define trigger")
     if trigger.get("type") != "ping":
@@ -340,6 +365,17 @@ def validate_segment_ping_matrix_check(segments, check, label):
                 die(f"{pair_label} {field} must reference a segment member as host.nic")
 
 
+def validate_segment_bidirectional_capture_check(hosts, segments, check, label):
+    segment_name = check.get("segment")
+    if not segment_name:
+        die(f"{label} must define segment")
+    if segment_name not in segments:
+        die(f"{label} references unknown segment {segment_name}")
+    validate_captures(hosts, check.get("captures"), label)
+    validate_capture_assertions(check, label)
+    validate_segment_ping_matrix_check(segments, check, label)
+
+
 def validate_checks(hosts, checks, segments=None):
     segments = segments or {}
     if checks in (None, []):
@@ -364,6 +400,8 @@ def validate_checks(hosts, checks, segments=None):
             validate_pktgen_dpdk_check(hosts, check, f"check {name}")
         elif check_type == "segment_ping_matrix":
             validate_segment_ping_matrix_check(segments, check, f"check {name}")
+        elif check_type == "segment_bidirectional_capture":
+            validate_segment_bidirectional_capture_check(hosts, segments, check, f"check {name}")
         else:
             die(f"check {name} has unsupported type {check_type}")
     validate_unique(names, "check name")

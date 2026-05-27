@@ -206,6 +206,75 @@ def test_packet_capture_rejects_unknown_nic(monkeypatch, tmp_path):
         render_topology.render(topology)
 
 
+def test_packet_capture_accepts_decode_assertions(monkeypatch, tmp_path):
+    base_env(monkeypatch)
+    topology = write_topology(
+        tmp_path,
+        textwrap.indent(
+            textwrap.dedent(
+                """
+                - name: capture-with-assertions
+                  type: packet_capture
+                  captures:
+                    - host: host-a
+                      nic: data
+                      filter: udp port 4789
+                  trigger:
+                    type: ping
+                    source: host-a
+                    destination: 10.10.0.2
+                  assertions:
+                    min_packets: 1
+                    vxlan_vni: 100
+                    inner_ips:
+                      - 10.10.0.1
+                      - 10.10.0.2
+                    outer_ips:
+                      - 172.16.0.1
+                    contains:
+                      - VXLAN
+                    not_contains:
+                      - "ICMP unreachable"
+                """
+            ).strip(),
+            "  ",
+        ),
+    )
+
+    data = render_topology.render(topology)
+
+    assert data["checks"][0]["assertions"]["vxlan_vni"] == 100
+
+
+def test_packet_capture_rejects_bad_assertions(monkeypatch, tmp_path):
+    base_env(monkeypatch)
+    topology = write_topology(
+        tmp_path,
+        textwrap.indent(
+            textwrap.dedent(
+                """
+                - name: bad-assertions
+                  type: packet_capture
+                  captures:
+                    - host: host-a
+                      nic: data
+                      filter: udp port 4789
+                  trigger:
+                    type: ping
+                    source: host-a
+                    destination: 10.10.0.2
+                  assertions:
+                    min_packets: 0
+                """
+            ).strip(),
+            "  ",
+        ),
+    )
+
+    with pytest.raises(SystemExit):
+        render_topology.render(topology)
+
+
 def test_pktgen_dpdk_rejects_missing_destination_mac(monkeypatch, tmp_path):
     base_env(monkeypatch)
     topology = write_topology(
@@ -388,6 +457,113 @@ def test_segment_rejects_conflicting_underlay_ip(monkeypatch, tmp_path):
                         underlay_nic: data
                         underlay_ip: 172.16.0.2/24
                     members: []
+                """
+            ).strip(),
+            "            ",
+        ),
+    )
+
+    with pytest.raises(SystemExit):
+        render_topology.render(topology)
+
+
+def test_segment_bidirectional_capture_accepts_members(monkeypatch, tmp_path):
+    base_env(monkeypatch)
+    topology = write_topology(
+        tmp_path,
+        textwrap.indent(
+            textwrap.dedent(
+                """
+                - name: capture-segment
+                  type: segment_bidirectional_capture
+                  segment: overlay
+                  captures:
+                    - host: host-a
+                      nic: data
+                      filter: udp port 4789
+                  pairs:
+                    - source: host-a.data
+                      destination: host-b.data
+                """
+            ).strip(),
+            "  ",
+        ),
+        textwrap.indent(
+            textwrap.dedent(
+                """
+                segments:
+                  overlay:
+                    vni: 100
+                    vteps:
+                      - host: host-a
+                        underlay_nic: data
+                        underlay_ip: 172.16.0.1/24
+                      - host: host-b
+                        underlay_nic: data
+                        underlay_ip: 172.16.0.2/24
+                    members:
+                      - host: host-a
+                        nic: data
+                        mode: access
+                        ip: 10.10.0.1/24
+                      - host: host-b
+                        nic: data
+                        mode: access
+                        ip: 10.10.0.2/24
+                """
+            ).strip(),
+            "            ",
+        ),
+    )
+
+    data = render_topology.render(topology)
+
+    assert data["checks"][0]["type"] == "segment_bidirectional_capture"
+
+
+def test_segment_bidirectional_capture_rejects_unknown_member(monkeypatch, tmp_path):
+    base_env(monkeypatch)
+    topology = write_topology(
+        tmp_path,
+        textwrap.indent(
+            textwrap.dedent(
+                """
+                - name: capture-segment
+                  type: segment_bidirectional_capture
+                  segment: overlay
+                  captures:
+                    - host: host-a
+                      nic: data
+                      filter: udp port 4789
+                  pairs:
+                    - source: host-a.data
+                      destination: missing.data
+                """
+            ).strip(),
+            "  ",
+        ),
+        textwrap.indent(
+            textwrap.dedent(
+                """
+                segments:
+                  overlay:
+                    vni: 100
+                    vteps:
+                      - host: host-a
+                        underlay_nic: data
+                        underlay_ip: 172.16.0.1/24
+                      - host: host-b
+                        underlay_nic: data
+                        underlay_ip: 172.16.0.2/24
+                    members:
+                      - host: host-a
+                        nic: data
+                        mode: access
+                        ip: 10.10.0.1/24
+                      - host: host-b
+                        nic: data
+                        mode: access
+                        ip: 10.10.0.2/24
                 """
             ).strip(),
             "            ",

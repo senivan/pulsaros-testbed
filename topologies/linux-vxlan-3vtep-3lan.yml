@@ -382,7 +382,11 @@ checks:
     timeout: 45
 
   - name: red-vxlan-underlay-capture
-    type: packet_capture
+    type: segment_bidirectional_capture
+    segment: red
+    count: 3
+    wait: 2
+    timeout: 45
     captures:
       - host: vtep-a
         nic: underlay
@@ -393,10 +397,7 @@ checks:
       - host: vtep-c
         nic: underlay
         filter: udp port 4789
-    trigger:
-      type: ping
-      source: red-client-a
-      destination: 10.10.10.12
-      count: 5
-      wait: 2
-      timeout: 45
+    assertions:
+      min_packets: 3
+      contains:
+        - VXLAN

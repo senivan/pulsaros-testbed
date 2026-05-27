@@ -142,10 +142,30 @@ The create step renders `artifacts/topology.json`, `artifacts/topology.env`,
 `ansible/inventory.generated.ini`, and `ansible/site.generated.yml`.
 
 Topology-specific tests should be declared in the topology `checks:` section.
-The generic pytest executor currently supports `ping`, `packet_capture`, and
-`pktgen_dpdk` checks, plus `segment_ping_matrix` checks for topology-declared
-client LAN segments, so new topologies do not need new fixed-host pytest
-modules for basic connectivity and traffic generation validation.
+The generic pytest executor currently supports `ping`, `packet_capture`,
+`pktgen_dpdk`, `segment_ping_matrix`, and `segment_bidirectional_capture`
+checks, so new topologies do not need new fixed-host pytest modules for basic
+connectivity and traffic evidence validation.
+
+Packet capture checks can include decoded tcpdump assertions:
+
+```yaml
+checks:
+  - name: red-vxlan-underlay-capture
+    type: segment_bidirectional_capture
+    segment: red
+    captures:
+      - host: vtep-a
+        nic: underlay
+        filter: udp port 4789
+    assertions:
+      min_packets: 1
+      contains:
+        - VXLAN
+```
+
+The test runner stores pcaps under `pcaps/` and decoded tcpdump output under
+`logs/*-tcpdump.log`.
 
 The sample `linux-vxlan-3vtep-3lan` topology exercises a static three-VTEP
 VXLAN mesh with three client LAN segments. It includes access clients and trunk
@@ -248,6 +268,7 @@ and generated QinQ SDN names derived from the same run ID.
 - `ansible/site.generated.yml`: generated Ansible playbook.
 - `logs/`: dmesg, journal, ip link, ip addr, and uname output.
 - `pcaps/`: VXLAN underlay captures from VTEPs.
+- `logs/*-tcpdump.log`: decoded packet-capture evidence for capture checks.
 - `junit/`: pytest JUnit XML reports.
 - `artifacts/ai-analysis.md`: local artifact summary plus optional Gemini analysis.
 

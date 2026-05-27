@@ -192,7 +192,7 @@ def collect_inputs() -> dict:
     log_samples = {}
     for path in sorted(LOGS.glob("*.log")):
         name = str(path.relative_to(ROOT))
-        if any(marker in path.name for marker in ("dmesg", "journal", "ip-link", "ip-addr", "uname")):
+        if any(marker in path.name for marker in ("dmesg", "journal", "ip-link", "ip-addr", "tcpdump", "uname")):
             log_samples[name] = redact(read_text(path))
 
     existing_artifacts = {}

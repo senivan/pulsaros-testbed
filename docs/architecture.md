@@ -43,7 +43,8 @@ scenario acceptance checks. Compatibility aliases are still rendered for older
 scripts, but topology-specific pytest assertions should consume the resolved
 JSON and the topology-declared `checks:` section instead of hard-coding host
 names. The generic topology check runner supports ping checks, tcpdump-backed
-packet capture checks, and client-side `pktgen_dpdk` traffic generation checks.
+packet capture checks with decoded-output assertions, bidirectional segment
+capture checks, and client-side `pktgen_dpdk` traffic generation checks.
 
 Topologies may also declare `segments` for topology-driven Linux VXLAN
 configuration. Each segment defines one VNI, participating VTEPs, local VTEP
