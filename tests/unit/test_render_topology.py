@@ -92,6 +92,8 @@ def test_multi_vtep_topology_renders_segments(monkeypatch):
     assert data["segments"]["green"]["members"][0]["mode"] == "trunk"
     assert data["segments"]["green"]["members"][0]["vlan"] == 30
     assert data["segments"]["red"]["vteps"][2]["underlay_address"] == "172.16.100.3"
+    assert data["segments"]["red"]["bridge"] == "br-10100"
+    assert data["segments"]["red"]["vxlan"] == "vx-10100"
     assert data["checks"][0]["type"] == "segment_ping_matrix"
 
 
@@ -296,6 +298,79 @@ def test_segment_trunk_member_requires_vlan(monkeypatch, tmp_path):
                         nic: data
                         mode: trunk
                         ip: 10.10.0.1/24
+                """
+            ).strip(),
+            "            ",
+        ),
+    )
+
+    with pytest.raises(SystemExit):
+        render_topology.render(topology)
+
+
+def test_segment_access_member_rejects_vlan(monkeypatch, tmp_path):
+    base_env(monkeypatch)
+    topology = write_topology(
+        tmp_path,
+        "  []",
+        textwrap.indent(
+            textwrap.dedent(
+                """
+                segments:
+                  access:
+                    vni: 100
+                    vteps:
+                      - host: host-a
+                        underlay_nic: data
+                        underlay_ip: 172.16.0.1/24
+                      - host: host-b
+                        underlay_nic: data
+                        underlay_ip: 172.16.0.2/24
+                    members:
+                      - host: host-a
+                        nic: data
+                        mode: access
+                        vlan: 10
+                        ip: 10.10.0.1/24
+                """
+            ).strip(),
+            "            ",
+        ),
+    )
+
+    with pytest.raises(SystemExit):
+        render_topology.render(topology)
+
+
+def test_segment_rejects_conflicting_underlay_ip(monkeypatch, tmp_path):
+    base_env(monkeypatch)
+    topology = write_topology(
+        tmp_path,
+        "  []",
+        textwrap.indent(
+            textwrap.dedent(
+                """
+                segments:
+                  first:
+                    vni: 100
+                    vteps:
+                      - host: host-a
+                        underlay_nic: data
+                        underlay_ip: 172.16.0.1/24
+                      - host: host-b
+                        underlay_nic: data
+                        underlay_ip: 172.16.0.2/24
+                    members: []
+                  second:
+                    vni: 101
+                    vteps:
+                      - host: host-a
+                        underlay_nic: data
+                        underlay_ip: 172.16.1.1/24
+                      - host: host-b
+                        underlay_nic: data
+                        underlay_ip: 172.16.0.2/24
+                    members: []
                 """
             ).strip(),
             "            ",

@@ -46,6 +46,8 @@
     def iface_by_mac(mac):
         wanted = mac.lower()
         for path in Path("/sys/class/net").iterdir():
+            if "." in path.name:
+                continue
             try:
                 if (path / "address").read_text().strip().lower() == wanted:
                     return path.name
@@ -62,6 +64,14 @@
     def delete_link(dev):
         run("ip", "link", "del", dev, check=False)
 
+    def link_exists(dev):
+        return subprocess.run(
+            ["ip", "link", "show", "dev", dev],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        ).returncode == 0
+
     def prepare_access_interface(dev, cidr):
         disable_nm(dev)
         sh(f"ip link set {dev!r} nomaster 2>/dev/null || true")
@@ -72,7 +82,8 @@
     def prepare_trunk_interface(dev, vlan, cidr):
         disable_nm(dev)
         subif = f"{dev}.{vlan}"
-        sh(f"ip link add link {dev!r} name {subif!r} type vlan id {int(vlan)} 2>/dev/null || true")
+        if not link_exists(subif):
+            run("ip", "link", "add", "link", dev, "name", subif, "type", "vlan", "id", str(int(vlan)))
         run("ip", "addr", "flush", "dev", subif)
         run("ip", "addr", "replace", cidr, "dev", subif)
         set_up(dev)
