@@ -169,6 +169,7 @@ def validate_segments(hosts, segments):
 
     names = []
     vnis = []
+    underlay_ips = {}
     for name, segment in segments.items():
         label = f"segment {name}"
         if not isinstance(name, str) or not re.fullmatch(r"[a-z0-9][a-z0-9-]*", name):
@@ -202,6 +203,14 @@ def validate_segments(hosts, segments):
             if not vtep.get("underlay_ip"):
                 die(f"{vtep_label} must define underlay_ip")
             validate_host_nic_ref(hosts, host, underlay_nic, vtep_label)
+            underlay_key = (host, underlay_nic)
+            underlay_ip = str(vtep["underlay_ip"])
+            if underlay_key in underlay_ips and underlay_ips[underlay_key] != underlay_ip:
+                die(
+                    f"{vtep_label} underlay_ip conflicts with previous "
+                    f"{host}.{underlay_nic} underlay_ip {underlay_ips[underlay_key]}"
+                )
+            underlay_ips[underlay_key] = underlay_ip
             vtep_hosts.append(host)
             local_nics = vtep.get("local_nics", [])
             if local_nics is None:
@@ -237,6 +246,8 @@ def validate_segments(hosts, segments):
                 die(f"{member_label} mode must be access or trunk")
             if member.get("vlan") not in (None, ""):
                 validate_vlan(member["vlan"], f"{member_label} vlan")
+            if mode == "access" and member.get("vlan") not in (None, ""):
+                die(f"{member_label} vlan is only valid when mode is trunk")
             if mode == "trunk" and member.get("vlan") in (None, "") and segment.get("vlan") in (None, ""):
                 die(f"{member_label} trunk mode requires member vlan or segment vlan")
 
@@ -247,10 +258,11 @@ def validate_segments(hosts, segments):
 
 def resolve_segments(hosts, segments):
     resolved = {}
-    for index, (name, segment) in enumerate(segments.items()):
+    for name, segment in segments.items():
         vlan = segment.get("vlan")
         if vlan not in (None, ""):
             vlan = int(vlan)
+        vni = int(segment["vni"])
         vteps = []
         for vtep in segment.get("vteps", []):
             host = hosts[vtep["host"]]
@@ -294,10 +306,10 @@ def resolve_segments(hosts, segments):
             )
         resolved[name] = {
             "name": name,
-            "vni": int(segment["vni"]),
+            "vni": vni,
             "vlan": vlan,
-            "bridge": f"brs{index}",
-            "vxlan": f"vxs{index}",
+            "bridge": f"br-{vni}",
+            "vxlan": f"vx-{vni}",
             "vteps": vteps,
             "members": members,
         }
