@@ -151,10 +151,10 @@ def _inject_remove_fdb_peer(topology, ssh_user, ssh_key, segment, source, destin
     macs = ["00:00:00:00:00:00", destination["mac"]]
     delete = " ".join(
         (
-            f"while bridge fdb del {shlex.quote(mac)} dev {shlex.quote(vxlan)} "
-            f"dst {shlex.quote(peer)} self 2>/dev/null; do :; done; "
-            f"while bridge fdb del {shlex.quote(mac)} dev {shlex.quote(vxlan)} "
-            f"2>/dev/null; do :; done;"
+            f"for attempt in 1 2 3 4 5; do "
+            f"bridge fdb del {shlex.quote(mac)} dev {shlex.quote(vxlan)} "
+            f"dst {shlex.quote(peer)} self 2>/dev/null || break; "
+            f"done;"
         )
         for peer in peers
         for mac in macs
