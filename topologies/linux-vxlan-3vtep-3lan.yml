@@ -401,3 +401,54 @@ checks:
       min_packets: 3
       contains:
         - VXLAN
+
+  - name: red-lan-perf-probe
+    type: segment_perf_probe
+    segment: red
+    count: 10
+    wait: 2
+    timeout: 45
+    pairs:
+      - source: red-client-a.data
+        destination: red-client-b.data
+      - source: red-client-a.data
+        destination: red-client-c.data
+    thresholds:
+      max_loss_percent: 0
+      max_rtt_avg_ms: 10
+
+faults:
+  - name: red-remove-fdb-a-to-b
+    type: remove_fdb_peer
+    segment: red
+    recover_timeout: 45
+    pairs:
+      - source: red-client-a.data
+        destination: red-client-b.data
+
+  - name: red-mtu-mismatch-a-to-b
+    type: mtu_mismatch
+    segment: red
+    packet_size: 1400
+    recover_timeout: 45
+    pairs:
+      - source: red-client-a.data
+        destination: red-client-b.data
+
+  - name: green-vlan-mismatch-a-to-b
+    type: vlan_mismatch
+    segment: green
+    fault_vlan: 31
+    recover_timeout: 45
+    pairs:
+      - source: trunk-client-a.data
+        destination: trunk-client-b.data
+
+  - name: red-bounce-vtep-underlay-a-to-b
+    type: bounce_vtep_underlay
+    segment: red
+    settle: 2
+    recover_timeout: 45
+    pairs:
+      - source: red-client-a.data
+        destination: red-client-b.data
