@@ -46,6 +46,7 @@ case "$SCENARIO" in
     run_pytest kernel-smoke tests/test_kernel.py
     run_pytest dpdk-smoke tests/test_hugepages.py tests/test_dpdk.py
     run_pytest topology-checks tests/test_topology_checks.py
+    run_pytest fault-injection tests/test_fault_injection.py
     ;;
   *)
     die "unsupported scenario: $SCENARIO"

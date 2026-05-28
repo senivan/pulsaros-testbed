@@ -376,6 +376,24 @@ def validate_segment_bidirectional_capture_check(hosts, segments, check, label):
     validate_segment_ping_matrix_check(segments, check, label)
 
 
+def validate_segment_perf_probe_check(segments, check, label):
+    validate_segment_ping_matrix_check(segments, check, label)
+    for field in ("count", "wait", "timeout"):
+        if field in check and int(check[field]) < 1:
+            die(f"{label} {field} must be at least 1")
+    thresholds = check.get("thresholds")
+    if thresholds in (None, ""):
+        return
+    if not isinstance(thresholds, dict):
+        die(f"{label} thresholds must be a mapping")
+    allowed = {"max_loss_percent", "max_rtt_avg_ms", "max_rtt_max_ms"}
+    for key, value in thresholds.items():
+        if key not in allowed:
+            die(f"{label} thresholds has unsupported field {key}")
+        if float(value) < 0:
+            die(f"{label} thresholds {key} must be non-negative")
+
+
 def validate_checks(hosts, checks, segments=None):
     segments = segments or {}
     if checks in (None, []):
@@ -402,10 +420,58 @@ def validate_checks(hosts, checks, segments=None):
             validate_segment_ping_matrix_check(segments, check, f"check {name}")
         elif check_type == "segment_bidirectional_capture":
             validate_segment_bidirectional_capture_check(hosts, segments, check, f"check {name}")
+        elif check_type == "segment_perf_probe":
+            validate_segment_perf_probe_check(segments, check, f"check {name}")
         else:
             die(f"check {name} has unsupported type {check_type}")
     validate_unique(names, "check name")
     return checks
+
+
+def validate_faults(hosts, faults, segments=None):
+    segments = segments or {}
+    if faults in (None, []):
+        return []
+    if not isinstance(faults, list):
+        die("faults must be a list")
+    names = []
+    supported = {"remove_fdb_peer", "mtu_mismatch", "vlan_mismatch", "bounce_vtep_underlay"}
+    for index, fault in enumerate(faults):
+        label = f"fault {index}"
+        if not isinstance(fault, dict):
+            die(f"{label} must be a mapping")
+        name = fault.get("name")
+        if not isinstance(name, str) or not re.fullmatch(r"[a-z0-9][a-z0-9-]*", name):
+            die(f"{label} must define a valid name")
+        names.append(name)
+        fault_type = fault.get("type")
+        if fault_type not in supported:
+            die(f"fault {name} has unsupported type {fault_type}")
+        segment_name = fault.get("segment")
+        if segment_name not in segments:
+            die(f"fault {name} references unknown segment {segment_name}")
+        validate_segment_ping_matrix_check(segments, fault, f"fault {name}")
+        if not fault.get("pairs") or len(fault["pairs"]) != 1:
+            die(f"fault {name} must define exactly one pair")
+        if fault_type == "vlan_mismatch":
+            pair = (fault.get("pairs") or [None])[0]
+            source_ref = pair.get("source") if isinstance(pair, dict) else None
+            segment_members = {
+                f"{member['host']}.{member['nic']}": member
+                for member in segments[segment_name].get("members", [])
+            }
+            member = segment_members.get(source_ref)
+            if not member or member.get("mode", "access") != "trunk":
+                die(f"fault {name} source must be a trunk segment member")
+            if fault.get("fault_vlan") not in (None, ""):
+                fault_vlan = validate_vlan(fault["fault_vlan"], f"fault {name} fault_vlan")
+                member_vlan = int(member.get("vlan", segments[segment_name].get("vlan")))
+                if fault_vlan == member_vlan:
+                    die(f"fault {name} fault_vlan must differ from source VLAN")
+        if "recover_timeout" in fault and int(fault["recover_timeout"]) < 1:
+            die(f"fault {name} recover_timeout must be at least 1")
+    validate_unique(names, "fault name")
+    return faults
 
 
 def render(topology_path, previous=None):
@@ -537,6 +603,8 @@ def render(topology_path, previous=None):
         }
     checks = validate_checks(hosts, source.get("checks", []), resolved["segments"])
     resolved["checks"] = resolve_tokens(resolved, {}, checks)
+    faults = validate_faults(hosts, source.get("faults", []), resolved["segments"])
+    resolved["faults"] = resolve_tokens(resolved, {}, faults)
     return resolved
 
 

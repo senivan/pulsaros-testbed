@@ -11,7 +11,9 @@ import pytest
 from conftest import PCAPS, TOPOLOGY_JSON, host_ip, host_nic, iface_by_mac, scp_from, ssh
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
+ARTIFACTS = ROOT / "artifacts"
 LOGS = ROOT / "logs"
+PERF_METRICS = ARTIFACTS / "perf-metrics.json"
 
 
 def _load_checks_for_collection():
@@ -43,7 +45,7 @@ def _run_ping_check(topology, ssh_user, ssh_key, check):
     count = _check_value(check, "count", 3)
     wait = _check_value(check, "wait", 2)
     command = f"ping -c {count} -W {wait} {shlex.quote(str(check['destination']))}"
-    ssh(
+    return ssh(
         topology,
         ssh_user,
         ssh_key,
@@ -95,6 +97,167 @@ def _run_segment_ping_matrix_check(topology, ssh_user, ssh_key, check):
             "timeout": timeout,
         }
         _run_ping_check(topology, ssh_user, ssh_key, ping_check)
+
+
+def _parse_ping_metrics(output):
+    metrics = {}
+    packet_match = re.search(
+        r"(?P<tx>\d+)\s+packets transmitted,\s+"
+        r"(?P<rx>\d+)\s+(?:packets\s+)?received,.*?"
+        r"(?P<loss>[0-9.]+)%\s+packet loss",
+        output,
+        re.DOTALL,
+    )
+    if packet_match:
+        metrics.update(
+            {
+                "packets_transmitted": int(packet_match.group("tx")),
+                "packets_received": int(packet_match.group("rx")),
+                "packet_loss_percent": float(packet_match.group("loss")),
+            }
+        )
+    rtt_match = re.search(
+        r"(?:rtt|round-trip) min/avg/max/(?:mdev|stddev) = "
+        r"(?P<min>[0-9.]+)/(?P<avg>[0-9.]+)/(?P<max>[0-9.]+)/(?P<mdev>[0-9.]+) ms",
+        output,
+    )
+    if rtt_match:
+        metrics.update(
+            {
+                "rtt_min_ms": float(rtt_match.group("min")),
+                "rtt_avg_ms": float(rtt_match.group("avg")),
+                "rtt_max_ms": float(rtt_match.group("max")),
+                "rtt_mdev_ms": float(rtt_match.group("mdev")),
+            }
+        )
+    return metrics
+
+
+def _parse_pktgen_metrics(output):
+    metrics = {}
+    for key, patterns in {
+        "tx_packets": (r"\btx\s+pkts?\s*[:=]\s*([0-9,]+)", r"\bopackets\s*[:=]\s*([0-9,]+)"),
+        "rx_packets": (r"\brx\s+pkts?\s*[:=]\s*([0-9,]+)", r"\bipackets\s*[:=]\s*([0-9,]+)"),
+        "tx_pps": (r"\btx\s+pps\s*[:=]\s*([0-9,.]+)", r"\bo?pps\s*[:=]\s*([0-9,.]+)"),
+        "tx_bytes": (r"\bobytes\s*[:=]\s*([0-9,]+)",),
+        "rx_bytes": (r"\bibytes\s*[:=]\s*([0-9,]+)",),
+    }.items():
+        for pattern in patterns:
+            match = re.search(pattern, output, re.IGNORECASE)
+            if match:
+                value = match.group(1).replace(",", "")
+                metrics[key] = float(value) if "." in value else int(value)
+                break
+    return metrics
+
+
+def _metric_warnings(metrics, thresholds):
+    warnings = []
+    checks = {
+        "max_loss_percent": "packet_loss_percent",
+        "max_rtt_avg_ms": "rtt_avg_ms",
+        "max_rtt_max_ms": "rtt_max_ms",
+    }
+    for threshold_key, metric_key in checks.items():
+        if threshold_key not in thresholds or metric_key not in metrics:
+            continue
+        threshold = float(thresholds[threshold_key])
+        if float(metrics[metric_key]) > threshold:
+            warnings.append(
+                f"{metric_key}={metrics[metric_key]} exceeds {threshold_key}={threshold}"
+            )
+    return warnings
+
+
+def _append_perf_metric(metric):
+    ARTIFACTS.mkdir(parents=True, exist_ok=True)
+    try:
+        data = json.loads(PERF_METRICS.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError):
+        data = {"probes": []}
+    data.setdefault("probes", []).append(metric)
+    PERF_METRICS.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def _run_segment_perf_probe_check(topology, ssh_user, ssh_key, check):
+    segment = topology["__resolved__"]["segments"][check["segment"]]
+    pairs = _check_pairs(segment, check)
+    count = _check_value(check, "count", 10)
+    wait = _check_value(check, "wait", 2)
+    timeout = _check_value(check, "timeout", 60)
+    thresholds = check.get("thresholds", {})
+
+    for source, destination in pairs:
+        destination_ip = _address(destination["ip"])
+        result = ssh(
+            topology,
+            ssh_user,
+            ssh_key,
+            source["host"],
+            f"ping -c {count} -W {wait} {shlex.quote(destination_ip)}",
+            timeout=timeout,
+            check=False,
+        )
+        if result.returncode == 255:
+            pytest.fail(f"{check['name']}: ssh failed on {source['host']}:\n{result.stderr}")
+        ping_output = result.stdout + result.stderr
+        ping_metrics = _parse_ping_metrics(ping_output)
+        warnings = _metric_warnings(ping_metrics, thresholds)
+        metric = {
+            "name": check["name"],
+            "segment": check["segment"],
+            "source": f"{source['host']}.{source['nic']}",
+            "destination": f"{destination['host']}.{destination['nic']}",
+            "destination_ip": destination_ip,
+            "report_only": True,
+            "ping_returncode": result.returncode,
+            "ping": ping_metrics,
+            "warnings": warnings,
+        }
+
+        if check.get("pktgen", False):
+            pktgen_name = re.sub(
+                r"[^A-Za-z0-9_.-]",
+                "-",
+                f"{check['name']}-{source['host']}-{destination['host']}-pktgen",
+            )
+            pktgen_check = {
+                "name": pktgen_name,
+                "source": source["host"],
+                "nic": source["nic"],
+                "destination_mac": destination["mac"],
+                "source_ip": _address(source["ip"]),
+                "destination_ip": destination_ip,
+                "protocol": check.get("protocol", "udp"),
+                "packet_size": _check_value(check, "packet_size", 128),
+                "rate_percent": _check_value(check, "rate_percent", 1),
+                "duration": _check_value(check, "duration", 5),
+                "timeout": _check_value(check, "pktgen_timeout", 30),
+            }
+            pktgen_result = _run_pktgen_dpdk_check(
+                topology,
+                ssh_user,
+                ssh_key,
+                pktgen_check,
+                check_result=False,
+            )
+            LOGS.mkdir(parents=True, exist_ok=True)
+            local_log = LOGS / f"{pktgen_name}.log"
+            local_log.write_text(pktgen_result.stdout + pktgen_result.stderr, encoding="utf-8")
+            metric["pktgen"] = {
+                "returncode": pktgen_result.returncode,
+                "log": str(local_log.relative_to(ROOT)),
+                "metrics": _parse_pktgen_metrics(pktgen_result.stdout + pktgen_result.stderr),
+            }
+            if pktgen_result.returncode != 0:
+                metric["warnings"].append(f"pktgen exited with rc={pktgen_result.returncode}")
+
+        _append_perf_metric(metric)
+        if metric["warnings"]:
+            print(
+                f"{check['name']} report-only warnings for "
+                f"{metric['source']} -> {metric['destination']}: {metric['warnings']}"
+            )
 
 
 def _pcap_name(check_name, capture):
@@ -317,7 +480,7 @@ def _lua_string(value):
     return json.dumps(str(value))
 
 
-def _run_pktgen_dpdk_check(topology, ssh_user, ssh_key, check):
+def _run_pktgen_dpdk_check(topology, ssh_user, ssh_key, check, check_result=True):
     nic = host_nic(topology, check["source"], check["nic"])
     source_if = iface_by_mac(topology, ssh_user, ssh_key, check["source"], nic["mac"])
     duration_ms = _check_value(check, "duration", 5) * 1000
@@ -390,13 +553,14 @@ pktgen.quit()
         "fi; "
         "exit ${pktgen_rc}"
     )
-    ssh(
+    return ssh(
         topology,
         ssh_user,
         ssh_key,
         check["source"],
         f"sudo -n bash -lc {shlex.quote(command)}",
         timeout=timeout + 10,
+        check=check_result,
     )
 
 
@@ -414,5 +578,7 @@ def test_topology_check(topology, ssh_user, ssh_key, topology_check):
         _run_segment_ping_matrix_check(topology, ssh_user, ssh_key, topology_check)
     elif topology_check["type"] == "segment_bidirectional_capture":
         _run_segment_bidirectional_capture_check(topology, ssh_user, ssh_key, topology_check)
+    elif topology_check["type"] == "segment_perf_probe":
+        _run_segment_perf_probe_check(topology, ssh_user, ssh_key, topology_check)
     else:
         pytest.fail(f"unsupported topology check type: {topology_check['type']}")

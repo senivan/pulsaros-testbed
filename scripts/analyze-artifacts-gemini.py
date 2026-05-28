@@ -173,6 +173,15 @@ def topology_summary(topology: dict) -> dict:
             ]
         checks.append(item)
 
+    faults = [
+        {
+            key: fault.get(key)
+            for key in ("name", "type", "segment", "recover_timeout")
+            if key in fault
+        }
+        for fault in topology.get("faults", [])
+    ]
+
     return {
         "name": topology.get("name", ""),
         "description": topology.get("description", ""),
@@ -181,6 +190,7 @@ def topology_summary(topology: dict) -> dict:
         "networks": networks,
         "segments": segments,
         "checks": checks,
+        "faults": faults,
     }
 
 
@@ -188,6 +198,8 @@ def collect_inputs() -> dict:
     ARTIFACTS.mkdir(parents=True, exist_ok=True)
     topology = topology_summary(read_json(ARTIFACTS / "topology.json"))
     run_state = read_json(ARTIFACTS / "run-state.json")
+    perf_metrics = read_json(ARTIFACTS / "perf-metrics.json")
+    fault_results = read_json(ARTIFACTS / "fault-results.json")
     junit = [parse_junit_file(path) for path in sorted(JUNIT.glob("*.xml"))]
     log_samples = {}
     for path in sorted(LOGS.glob("*.log")):
@@ -214,6 +226,8 @@ def collect_inputs() -> dict:
         },
         "topology": topology,
         "run_state": run_state,
+        "perf_metrics": perf_metrics,
+        "fault_results": fault_results,
         "topology_env": redact(read_text(ARTIFACTS / "topology.env", limit=12000)),
         "artifact_text": existing_artifacts,
         "junit": junit,
@@ -248,6 +262,16 @@ def local_summary(data: dict) -> str:
     lines.append(f"- PCAP files: {len(data['pcaps'])}")
     for pcap in data["pcaps"]:
         lines.append(f"  - `{pcap['file']}`: {pcap['bytes']} bytes")
+    perf_metrics = data.get("perf_metrics", {})
+    perf_probes = perf_metrics.get("probes", []) if isinstance(perf_metrics, dict) else []
+    if perf_probes:
+        warnings = sum(len(probe.get("warnings", [])) for probe in perf_probes)
+        lines.append(f"- Performance probes: {len(perf_probes)} report-only, {warnings} warnings")
+    fault_results = data.get("fault_results", {})
+    faults = fault_results.get("faults", []) if isinstance(fault_results, dict) else []
+    if faults:
+        recovered = sum(1 for fault in faults if fault.get("recovered"))
+        lines.append(f"- Fault injections: {len(faults)} recorded, {recovered} recovered")
 
     if failed_cases:
         lines.extend(["", "## Failed Cases", ""])
@@ -273,7 +297,11 @@ def gemini_prompt(data: dict) -> str:
         "VLANs, VTEPs, local NICs, and checks from that topology object as "
         "intentional configuration. If topology data is absent, avoid "
         "topology-specific misconfiguration claims and ask for the missing "
-        "topology artifact instead. If JUnit reports zero failures and pcap "
+        "topology artifact instead. Performance metrics are report-only in "
+        "this repository: treat their warnings as advisory caveats unless JUnit "
+        "also failed. Fault-injection tests intentionally create temporary "
+        "outages; distinguish an expected injected outage from a failed "
+        "restoration or recovery assertion. If JUnit reports zero failures and pcap "
         "files are present and non-empty, state that the run appears successful "
         "and only list low-confidence observations under a separate caveats "
         "section. Keep the response under 800 words and end with a complete "
