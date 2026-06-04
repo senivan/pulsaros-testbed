@@ -24,7 +24,7 @@
     dest: /tmp/pulsaros-testbed-topology.json
     mode: "0644"
 
-- name: Configure topology-declared client LANs and static VXLAN segments
+- name: Configure topology-declared client LANs and VXLAN dataplane segments
   ansible.builtin.shell: |
     set -euo pipefail
     python3 - <<'PY'
@@ -36,6 +36,7 @@
     host_name = os.environ["TOPOLOGY_HOST"]
     topology = json.loads(Path("/tmp/pulsaros-testbed-topology.json").read_text())
     segments = topology.get("segments", {})
+    control_plane = topology.get("control_plane", {"type": "static"})
 
     def run(*args, check=True):
         subprocess.run(args, check=check)
@@ -155,19 +156,20 @@
             run("ip", "link", "set", vxlan, "promisc", "on")
             run("ip", "link", "set", vxlan, "master", bridge)
             set_up(vxlan)
-            for peer in peers:
-                run(
-                    "bridge",
-                    "fdb",
-                    "append",
-                    "00:00:00:00:00:00",
-                    "dev",
-                    vxlan,
-                    "dst",
-                    peer["underlay_address"],
-                    "self",
-                    check=False,
-                )
+            if control_plane.get("type", "static") == "static":
+                for peer in peers:
+                    run(
+                        "bridge",
+                        "fdb",
+                        "append",
+                        "00:00:00:00:00:00",
+                        "dev",
+                        vxlan,
+                        "dst",
+                        peer["underlay_address"],
+                        "self",
+                        check=False,
+                    )
             sh(f"bridge fdb show dev {vxlan!r}")
 
     configure_clients()

@@ -1,0 +1,92 @@
+---
+- name: Install FRR
+  ansible.builtin.package:
+    name: frr
+    state: present
+
+- name: Copy resolved topology to guest
+  ansible.builtin.copy:
+    content: "{{ lookup('ansible.builtin.file', playbook_dir + '/../artifacts/topology.json') }}"
+    dest: /tmp/pulsaros-testbed-topology.json
+    mode: "0644"
+
+- name: Configure FRR EVPN control plane
+  ansible.builtin.shell: |
+    set -euo pipefail
+    python3 - <<'PY'
+    import json
+    import os
+    from pathlib import Path
+
+    host_name = os.environ["TOPOLOGY_HOST"]
+    topology = json.loads(Path("/tmp/pulsaros-testbed-topology.json").read_text())
+    control_plane = topology.get("control_plane", {})
+    if control_plane.get("type") != "evpn":
+        raise SystemExit(0)
+
+    host = control_plane.get("hosts", {}).get(host_name)
+    if not host:
+        raise SystemExit(0)
+
+    asn = int(control_plane["asn"])
+    lines = [
+        "frr defaults traditional",
+        f"hostname {host_name}",
+        "service integrated-vtysh-config",
+        "!",
+        f"router bgp {asn}",
+        f" bgp router-id {host['router_id']}",
+        " no bgp default ipv4-unicast",
+    ]
+    for peer in host.get("peers", []):
+        lines.extend(
+            [
+                f" neighbor {peer['address']} remote-as {asn}",
+                f" neighbor {peer['address']} update-source {host['underlay_address']}",
+            ]
+        )
+    lines.extend(
+        [
+            " !",
+            " address-family l2vpn evpn",
+        ]
+    )
+    for peer in host.get("peers", []):
+        lines.append(f"  neighbor {peer['address']} activate")
+        if peer.get("route_reflector_client"):
+            lines.append(f"  neighbor {peer['address']} route-reflector-client")
+    lines.extend(
+        [
+            "  advertise-all-vni",
+            " exit-address-family",
+            "!",
+            "line vty",
+            "!",
+            "",
+        ]
+    )
+
+    Path("/etc/frr").mkdir(parents=True, exist_ok=True)
+    Path("/etc/frr/frr.conf").write_text("\n".join(lines), encoding="utf-8")
+    daemons = Path("/etc/frr/daemons")
+    if daemons.exists():
+        content = daemons.read_text(encoding="utf-8")
+        replacements = {
+            "zebra=no": "zebra=yes",
+            "bgpd=no": "bgpd=yes",
+        }
+        for old, new in replacements.items():
+            content = content.replace(old, new)
+        daemons.write_text(content, encoding="utf-8")
+    PY
+  args:
+    executable: /bin/bash
+  environment:
+    TOPOLOGY_HOST: "{{ inventory_hostname }}"
+  changed_when: true
+
+- name: Enable and restart FRR
+  ansible.builtin.systemd:
+    name: frr
+    enabled: true
+    state: restarted

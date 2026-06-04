@@ -44,10 +44,14 @@ def test_default_topology_renders_legacy_compat(monkeypatch):
     assert data["networks"]["underlay"]["inner_vlan"] == 102
     assert data["qinq"]["zone"] == "pq123456"
     assert data["qinq"]["service_vlan"] == 3456
-    assert data["checks"][0]["name"] == "overlay-ping"
-    assert data["checks"][1]["captures"][0]["nic"] == "underlay"
-    assert data["checks"][2]["name"] == "pktgen-client-a-to-b"
-    assert data["checks"][2]["destination_mac"] == data["hosts"]["client-b"]["nics"][1]["mac"]
+    assert data["control_plane"]["type"] == "evpn"
+    assert data["control_plane"]["peering"] == "full_mesh"
+    assert data["control_plane"]["hosts"]["vtep-a"]["peers"][0]["host"] == "vtep-b"
+    assert data["checks"][0]["name"] == "evpn-control-plane"
+    assert data["checks"][1]["name"] == "overlay-ping"
+    assert data["checks"][2]["captures"][0]["nic"] == "underlay"
+    assert data["checks"][3]["name"] == "pktgen-client-a-to-b"
+    assert data["checks"][3]["destination_mac"] == data["hosts"]["client-b"]["nics"][1]["mac"]
     assert data["segments"]["default-lan"]["vni"] == 100
     assert data["segments"]["default-lan"]["vteps"][0]["underlay_address"] == "172.16.100.1"
 
@@ -111,9 +115,16 @@ def test_multi_vtep_topology_renders_segments(monkeypatch):
     assert data["segments"]["red"]["vteps"][2]["underlay_address"] == "172.16.100.3"
     assert data["segments"]["red"]["bridge"] == "br-10100"
     assert data["segments"]["red"]["vxlan"] == "vx-10100"
-    assert data["checks"][0]["type"] == "segment_ping_matrix"
+    assert data["control_plane"]["type"] == "evpn"
+    assert data["control_plane"]["peering"] == "route_reflector"
+    assert data["control_plane"]["route_reflectors"] == ["vtep-a"]
+    assert data["control_plane"]["hosts"]["vtep-a"]["route_reflector"] is True
+    assert data["control_plane"]["hosts"]["vtep-b"]["peers"][0]["host"] == "vtep-a"
+    assert data["control_plane"]["hosts"]["vtep-a"]["peers"][0]["route_reflector_client"] is True
+    assert data["checks"][0]["type"] == "evpn_control_plane"
+    assert data["checks"][1]["type"] == "segment_ping_matrix"
     assert data["checks"][-1]["type"] == "segment_perf_probe"
-    assert data["faults"][0]["type"] == "remove_fdb_peer"
+    assert data["faults"][0]["type"] == "bgp_peer_shutdown"
     assert data["faults"][2]["type"] == "vlan_mismatch"
 
 
@@ -354,6 +365,91 @@ def test_segment_rejects_duplicate_vni(monkeypatch, tmp_path):
                         underlay_nic: data
                         underlay_ip: 172.16.0.2/24
                     members: []
+                """
+            ).strip(),
+            "            ",
+        ),
+    )
+
+    with pytest.raises(SystemExit):
+        render_topology.render(topology)
+
+
+def test_evpn_full_mesh_resolves_peer_metadata(monkeypatch, tmp_path):
+    base_env(monkeypatch)
+    topology = write_topology(
+        tmp_path,
+        textwrap.indent(
+            textwrap.dedent(
+                """
+                - name: evpn-health
+                  type: evpn_control_plane
+                """
+            ).strip(),
+            "  ",
+        ),
+        textwrap.indent(
+            textwrap.dedent(
+                """
+                segments:
+                  overlay:
+                    vni: 100
+                    vteps:
+                      - host: host-a
+                        underlay_nic: data
+                        underlay_ip: 172.16.0.1/24
+                      - host: host-b
+                        underlay_nic: data
+                        underlay_ip: 172.16.0.2/24
+                    members: []
+                control_plane:
+                  type: evpn
+                  asn: 65010
+                  peering: full_mesh
+                """
+            ).strip(),
+            "            ",
+        ),
+    )
+
+    data = render_topology.render(topology)
+
+    assert data["control_plane"]["asn"] == 65010
+    assert data["control_plane"]["hosts"]["host-a"]["router_id"] == "172.16.0.1"
+    assert data["control_plane"]["hosts"]["host-a"]["peers"] == [
+        {
+            "host": "host-b",
+            "address": "172.16.0.2",
+            "route_reflector_client": False,
+        }
+    ]
+    assert data["checks"][0]["type"] == "evpn_control_plane"
+
+
+def test_evpn_route_reflector_rejects_unknown_rr(monkeypatch, tmp_path):
+    base_env(monkeypatch)
+    topology = write_topology(
+        tmp_path,
+        "  []",
+        textwrap.indent(
+            textwrap.dedent(
+                """
+                segments:
+                  overlay:
+                    vni: 100
+                    vteps:
+                      - host: host-a
+                        underlay_nic: data
+                        underlay_ip: 172.16.0.1/24
+                      - host: host-b
+                        underlay_nic: data
+                        underlay_ip: 172.16.0.2/24
+                    members: []
+                control_plane:
+                  type: evpn
+                  peering: route_reflector
+                  route_reflectors:
+                    - missing-host
                 """
             ).strip(),
             "            ",

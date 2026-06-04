@@ -247,6 +247,43 @@ def _inject_bounce_vtep_underlay(topology, ssh_user, ssh_key, segment, source):
     )
 
 
+def _evpn_peer_address(topology, local_host, peer_host):
+    control_plane = topology["__resolved__"].get("control_plane", {})
+    host = control_plane.get("hosts", {}).get(local_host)
+    if not host:
+        pytest.fail(f"no EVPN control-plane host data for {local_host}")
+    for peer in host.get("peers", []):
+        if peer["host"] == peer_host:
+            return peer["address"]
+    pytest.fail(f"no EVPN peer from {local_host} to {peer_host}")
+
+
+def _inject_bgp_peer_shutdown(topology, ssh_user, ssh_key, segment, source, destination):
+    source_vtep = _attached_vtep(topology, segment, source)
+    destination_vtep = _attached_vtep(topology, segment, destination)
+    control_plane = topology["__resolved__"].get("control_plane", {})
+    asn = int(control_plane.get("asn", 65000))
+    peer_address = _evpn_peer_address(topology, source_vtep["host"], destination_vtep["host"])
+    shutdown = (
+        f"vtysh -c 'configure terminal' "
+        f"-c 'router bgp {asn}' "
+        f"-c 'neighbor {peer_address} shutdown'"
+    )
+    restore = (
+        f"vtysh -c 'configure terminal' "
+        f"-c 'router bgp {asn}' "
+        f"-c 'no neighbor {peer_address} shutdown'"
+    )
+    _sudo(topology, ssh_user, ssh_key, source_vtep["host"], shutdown)
+    return lambda: _sudo(topology, ssh_user, ssh_key, source_vtep["host"], restore, check=False)
+
+
+def _inject_frr_restart(topology, ssh_user, ssh_key, segment, source):
+    source_vtep = _attached_vtep(topology, segment, source)
+    _sudo(topology, ssh_user, ssh_key, source_vtep["host"], "systemctl restart frr")
+    return lambda: _sudo(topology, ssh_user, ssh_key, source_vtep["host"], "systemctl restart frr", check=False)
+
+
 def test_fault_injection(fault_definition, request, ssh_user, ssh_key):
     if fault_definition is None:
         pytest.skip("topology declares no faults")
@@ -297,6 +334,16 @@ def test_fault_injection(fault_definition, request, ssh_user, ssh_key):
                 restore = _inject_bounce_vtep_underlay(
                     topology, ssh_user, ssh_key, segment, source
                 )
+                time.sleep(int(fault_definition.get("settle", 2)))
+                down_result = _ping(topology, ssh_user, ssh_key, source["host"], destination_ip)
+            elif fault_type == "bgp_peer_shutdown":
+                restore = _inject_bgp_peer_shutdown(
+                    topology, ssh_user, ssh_key, segment, source, destination
+                )
+                time.sleep(int(fault_definition.get("settle", 5)))
+                down_result = _ping(topology, ssh_user, ssh_key, source["host"], destination_ip)
+            elif fault_type == "frr_restart":
+                restore = _inject_frr_restart(topology, ssh_user, ssh_key, segment, source)
                 time.sleep(int(fault_definition.get("settle", 2)))
                 down_result = _ping(topology, ssh_user, ssh_key, source["host"], destination_ip)
             else:
