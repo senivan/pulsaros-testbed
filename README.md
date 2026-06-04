@@ -435,6 +435,10 @@ VM creation uses linked clones by default because the testbed validates network
 functionality, not storage isolation. Set `PVE_FULL_CLONE=1` to use full clones;
 in that mode `STORAGE` selects the target Proxmox storage.
 
+Provisioning and diagnostics are parallelized by default. `ANSIBLE_FORKS`
+controls Ansible provisioning fan-out, and `PVE_COLLECT_JOBS` controls how many
+hosts collect logs at once.
+
 In QinQ mode, each run creates disposable Proxmox SDN objects on top of
 `SDN_BRIDGE`. Generated names are derived from the run suffix:
 

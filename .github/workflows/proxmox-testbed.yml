@@ -33,6 +33,14 @@ on:
         options:
           - "0"
           - "1"
+      ansible_forks:
+        description: "Parallel Ansible forks for VM provisioning"
+        required: true
+        default: "20"
+      collect_jobs:
+        description: "Parallel host log collection workers"
+        required: true
+        default: "6"
       mgmt_bridge:
         description: "Management bridge"
         required: true
@@ -211,6 +219,8 @@ jobs:
       TEMPLATE_ID: ${{ inputs.template_vmid }}
       STORAGE: ${{ inputs.storage }}
       PVE_FULL_CLONE: ${{ inputs.pve_full_clone }}
+      ANSIBLE_FORKS: ${{ inputs.ansible_forks }}
+      PVE_COLLECT_JOBS: ${{ inputs.collect_jobs }}
       MGMT_BRIDGE: ${{ inputs.mgmt_bridge }}
       NETWORK_MODE: ${{ inputs.network_mode }}
       SDN_BRIDGE: ${{ inputs.sdn_bridge }}
