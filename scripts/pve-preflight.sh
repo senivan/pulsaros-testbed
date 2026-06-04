@@ -15,8 +15,15 @@ run_pve() {
 }
 
 need_env TEMPLATE_ID
-need_env STORAGE
 need_env MGMT_BRIDGE
+PVE_FULL_CLONE="${PVE_FULL_CLONE:-0}"
+case "$PVE_FULL_CLONE" in
+  0|1) ;;
+  *) die "PVE_FULL_CLONE must be 0 or 1, got: $PVE_FULL_CLONE" ;;
+esac
+if [[ "$PVE_FULL_CLONE" == "1" ]]; then
+  need_env STORAGE
+fi
 TOPOLOGY="${TOPOLOGY:-linux-vxlan-reference}"
 TOPOLOGY_FILE="${TOPOLOGY_FILE:-topologies/${TOPOLOGY}.yml}"
 [[ -f "$TOPOLOGY_FILE" ]] || die "topology file not found: $TOPOLOGY_FILE"
@@ -54,8 +61,12 @@ if ! run_pve qm config "$TEMPLATE_ID" | grep -q '^template: 1'; then
   die "VM $TEMPLATE_ID exists but is not marked as a template"
 fi
 
-log "Checking storage $STORAGE"
-run_pve pvesm status --storage "$STORAGE" >/dev/null 2>&1 || die "storage $STORAGE is not available"
+if [[ "$PVE_FULL_CLONE" == "1" ]]; then
+  log "Checking storage $STORAGE"
+  run_pve pvesm status --storage "$STORAGE" >/dev/null 2>&1 || die "storage $STORAGE is not available"
+else
+  log "Skipping storage check because linked clones are enabled"
+fi
 
 log "Checking management bridge $MGMT_BRIDGE"
 [[ -d "/sys/class/net/$MGMT_BRIDGE" ]] || die "management bridge $MGMT_BRIDGE not found"

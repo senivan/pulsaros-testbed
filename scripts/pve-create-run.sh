@@ -26,8 +26,16 @@ finish_create_state() {
 trap finish_create_state EXIT
 
 need_env TEMPLATE_ID
-need_env STORAGE
 need_env MGMT_BRIDGE
+
+PVE_FULL_CLONE="${PVE_FULL_CLONE:-0}"
+case "$PVE_FULL_CLONE" in
+  0|1) ;;
+  *) die "PVE_FULL_CLONE must be 0 or 1, got: $PVE_FULL_CLONE" ;;
+esac
+if [[ "$PVE_FULL_CLONE" == "1" ]]; then
+  need_env STORAGE
+fi
 
 NETWORK_MODE="${NETWORK_MODE:-qinq}"
 case "$NETWORK_MODE" in
@@ -107,6 +115,7 @@ create_sdn_qinq() {
 
 clone_vm() {
   local host="$1" vmid="$2" name="$3" actual_name
+  local clone_args=("$TEMPLATE_ID" "$vmid" --name "$name")
   if run_pve qm status "$vmid" >/dev/null 2>&1; then
     actual_name=$(run_pve qm config "$vmid" | awk -F': ' '/^name:/ {print $2}')
     if [[ "$actual_name" != "$name" ]]; then
@@ -116,8 +125,14 @@ clone_vm() {
     ./scripts/run-state.py vm "$host" reused
     return 0
   fi
-  log "Cloning $name as VMID $vmid"
-  run_pve qm clone "$TEMPLATE_ID" "$vmid" --name "$name" --full 1 --storage "$STORAGE"
+  if [[ "$PVE_FULL_CLONE" == "1" ]]; then
+    log "Full-cloning $name as VMID $vmid on $STORAGE"
+    clone_args+=(--full 1 --storage "$STORAGE")
+  else
+    log "Linked-cloning $name as VMID $vmid"
+    clone_args+=(--full 0)
+  fi
+  run_pve qm clone "${clone_args[@]}"
   ./scripts/run-state.py vm "$host" cloned
 }
 

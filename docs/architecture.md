@@ -1,8 +1,9 @@
 # Architecture
 
-Each test run renders a topology YAML file, then creates full-clone VMs from a
-Proxmox template. The default topology in `topologies/linux-vxlan-reference.yml`
-creates:
+Each test run renders a topology YAML file, then creates disposable linked-clone
+VMs from a Proxmox template by default. Set `PVE_FULL_CLONE=1` to use full
+clones when storage isolation or template compatibility requires it. The
+default topology in `topologies/linux-vxlan-reference.yml` creates:
 
 ```text
 pulsar-${RUN_ID}-client-a
