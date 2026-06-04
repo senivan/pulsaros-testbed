@@ -47,6 +47,8 @@ def test_default_topology_renders_legacy_compat(monkeypatch):
     assert data["control_plane"]["type"] == "evpn"
     assert data["control_plane"]["peering"] == "full_mesh"
     assert data["control_plane"]["hosts"]["vtep-a"]["peers"][0]["host"] == "vtep-b"
+    assert data["plays"][0]["name"] == "Disable shell OSC context output"
+    assert data["plays"][0]["gather_facts"] is False
     assert data["checks"][0]["name"] == "evpn-control-plane"
     assert data["checks"][1]["name"] == "overlay-ping"
     assert data["checks"][2]["captures"][0]["nic"] == "underlay"
@@ -121,6 +123,8 @@ def test_multi_vtep_topology_renders_segments(monkeypatch):
     assert data["control_plane"]["hosts"]["vtep-a"]["route_reflector"] is True
     assert data["control_plane"]["hosts"]["vtep-b"]["peers"][0]["host"] == "vtep-a"
     assert data["control_plane"]["hosts"]["vtep-a"]["peers"][0]["route_reflector_client"] is True
+    assert data["plays"][0]["name"] == "Disable shell OSC context output"
+    assert data["plays"][0]["gather_facts"] is False
     assert data["checks"][0]["type"] == "evpn_control_plane"
     assert data["checks"][1]["type"] == "segment_ping_matrix"
     assert data["checks"][-1]["type"] == "segment_perf_probe"

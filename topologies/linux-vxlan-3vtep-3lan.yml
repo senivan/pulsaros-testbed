@@ -348,6 +348,21 @@ control_plane:
     - vtep-a
 
 plays:
+  - name: Disable shell OSC context output
+    hosts: all
+    become: true
+    gather_facts: false
+    tasks:
+      - name: Disable systemd OSC context shell profile
+        ansible.builtin.raw: |
+          for path in \
+            /etc/profile.d/80-systemd-osc-context.sh \
+            /usr/lib/systemd/profile.d/80-systemd-osc-context.sh; do
+            if [ -e "$path" ]; then
+              mv "$path" "$path.pulsaros-disabled"
+            fi
+          done
+        changed_when: false
   - name: Provision all testbed VMs
     hosts: all
     become: true
