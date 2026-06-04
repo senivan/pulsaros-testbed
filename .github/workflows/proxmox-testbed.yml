@@ -41,6 +41,10 @@ on:
         description: "Parallel host log collection workers"
         required: true
         default: "6"
+      destroy_jobs:
+        description: "Parallel VM destroy workers"
+        required: true
+        default: "6"
       mgmt_bridge:
         description: "Management bridge"
         required: true
@@ -221,6 +225,7 @@ jobs:
       PVE_FULL_CLONE: ${{ inputs.pve_full_clone }}
       ANSIBLE_FORKS: ${{ inputs.ansible_forks }}
       PVE_COLLECT_JOBS: ${{ inputs.collect_jobs }}
+      PVE_DESTROY_JOBS: ${{ inputs.destroy_jobs }}
       MGMT_BRIDGE: ${{ inputs.mgmt_bridge }}
       NETWORK_MODE: ${{ inputs.network_mode }}
       SDN_BRIDGE: ${{ inputs.sdn_bridge }}
