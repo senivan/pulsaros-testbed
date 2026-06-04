@@ -17,6 +17,8 @@ RUN_ID="${1:-}"
 [[ "$RUN_ID" =~ ^[0-9]+$ ]] || die "usage: $0 RUN_ID"
 REQUESTED_RUN_ID="$RUN_ID"
 mkdir -p logs pcaps artifacts junit
+PVE_COLLECT_JOBS="${PVE_COLLECT_JOBS:-6}"
+[[ "$PVE_COLLECT_JOBS" =~ ^[1-9][0-9]*$ ]] || die "PVE_COLLECT_JOBS must be a positive integer"
 
 if [[ ! -f artifacts/topology.env ]]; then
   warn "artifacts/topology.env not found; nothing to collect"
@@ -56,20 +58,27 @@ collect_pve_serial() {
   [[ -n "$vmid" ]] || return 0
   log "Collecting Proxmox serial console from $host"
   local serial_socket="/var/run/qemu-server/${vmid}.serial0"
+  local log_path="logs/${host}-serial-console.log"
+  local rc=0
   if (( EUID == 0 )); then
     if [[ -S "$serial_socket" ]]; then
-      timeout 8 socat - "UNIX-CONNECT:${serial_socket}" > "logs/${host}-serial-console.log" 2>&1 || warn "failed to collect Proxmox serial console from $host"
+      timeout 8 socat - "UNIX-CONNECT:${serial_socket}" > "$log_path" 2>&1 || rc=$?
     else
-      timeout 8 qm terminal "$vmid" > "logs/${host}-serial-console.log" 2>&1 || warn "failed to collect Proxmox serial console from $host"
+      timeout 8 qm terminal "$vmid" > "$log_path" 2>&1 || rc=$?
     fi
   elif command -v script >/dev/null 2>&1; then
-    timeout 8 script -q -c "sudo -n qm terminal $vmid" /dev/null > "logs/${host}-serial-console.log" 2>&1 || warn "failed to collect Proxmox serial console from $host"
+    timeout 8 script -q -c "sudo -n qm terminal $vmid" /dev/null > "$log_path" 2>&1 || rc=$?
   else
     if sudo -n test -S "$serial_socket"; then
-      timeout 8 sudo -n socat - "UNIX-CONNECT:${serial_socket}" > "logs/${host}-serial-console.log" 2>&1 || warn "failed to collect Proxmox serial console from $host"
+      timeout 8 sudo -n socat - "UNIX-CONNECT:${serial_socket}" > "$log_path" 2>&1 || rc=$?
     else
-      timeout 8 sudo -n qm terminal "$vmid" > "logs/${host}-serial-console.log" 2>&1 || warn "failed to collect Proxmox serial console from $host"
+      timeout 8 sudo -n qm terminal "$vmid" > "$log_path" 2>&1 || rc=$?
     fi
+  fi
+  if (( rc == 124 )) && [[ -s "$log_path" ]]; then
+    log "Captured bounded serial console sample from $host"
+  elif (( rc != 0 )); then
+    warn "failed to collect Proxmox serial console from $host"
   fi
 }
 
@@ -117,6 +126,9 @@ collect_guest_agent_cmd() {
 
   pid="$(printf '%s\n' "$exec_output" | sed -n 's/.*"pid"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' | head -n1)"
   if [[ -z "$pid" ]]; then
+    if command -v jq >/dev/null 2>&1 && printf '%s\n' "$exec_output" | jq -e '(.exited == true or .exited == 1) and ((.exitcode // 1) == 0)' >/dev/null 2>&1; then
+      return 0
+    fi
     warn "guest-agent $suffix collection from $host did not return a pid"
     return 0
   fi
@@ -140,6 +152,36 @@ collect_guest_agent_cmd() {
   warn "guest-agent $suffix collection from $host did not finish before timeout"
 }
 
+collect_host() {
+  local entry="$1" host ip vmid
+  [[ -n "$entry" ]] || return 0
+  host=$(printf '%s' "$entry" | base64 -d | jq -r '.name')
+  ip=$(printf '%s' "$entry" | base64 -d | jq -r '.management_ip // ""')
+  vmid=$(printf '%s' "$entry" | base64 -d | jq -r '.vmid // ""')
+  [[ -n "$host" ]] || return 0
+  collect_pve_cmd "$host" "$vmid" qm-status qm status "$vmid" --verbose
+  collect_pve_cmd "$host" "$vmid" qm-config qm config "$vmid"
+  collect_pve_serial "$host" "$vmid"
+  collect_guest_agent_cmd "$host" "$vmid" ping "true"
+  collect_guest_agent_cmd "$host" "$vmid" ip-addr "ip addr || true"
+  collect_guest_agent_cmd "$host" "$vmid" uname "uname -a || true"
+  collect_guest_agent_cmd "$host" "$vmid" journal "journalctl -b --no-pager | tail -n 300 || true"
+  collect_cmd "$host" "$ip" dmesg "sudo dmesg || dmesg"
+  collect_cmd "$host" "$ip" journal "sudo journalctl -b --no-pager || journalctl -b --no-pager"
+  collect_cmd "$host" "$ip" ip-link "ip link"
+  collect_cmd "$host" "$ip" ip-addr "ip addr"
+  collect_cmd "$host" "$ip" uname "uname -a"
+  collect_cmd "$host" "$ip" kernel-rpms "rpm -qa 'kernel*' | sort || true"
+  collect_cmd "$host" "$ip" kernel-boot "sudo grubby --info=DEFAULT || true; findmnt / || true; cat /proc/cmdline || true"
+  collect_cmd "$host" "$ip" testbed-tmp "sudo sh -c 'ls -la /tmp/pulsaros-testbed 2>/dev/null || true; for f in /tmp/pulsaros-testbed/*.log; do [ -f \"\$f\" ] || continue; echo === \"\$f\"; cat \"\$f\"; done'"
+}
+
+wait_for_collect_slot() {
+  while (( $(jobs -pr | wc -l | tr -d '[:space:]') >= PVE_COLLECT_JOBS )); do
+    sleep 0.2
+  done
+}
+
 if [[ -f artifacts/topology.json ]]; then
   mapfile -t host_entries < <(jq -r '.hosts[] | @base64' artifacts/topology.json)
 else
@@ -156,30 +198,21 @@ else
     ][] | @base64')
 fi
 
-log "Collecting from ${#host_entries[@]} topology hosts"
+log "Collecting from ${#host_entries[@]} topology hosts with $PVE_COLLECT_JOBS workers"
 collect_sdn_state
+collect_pids=()
 for entry in "${host_entries[@]}"; do
-  [[ -n "$entry" ]] || continue
-  host=$(printf '%s' "$entry" | base64 -d | jq -r '.name')
-  ip=$(printf '%s' "$entry" | base64 -d | jq -r '.management_ip // ""')
-  vmid=$(printf '%s' "$entry" | base64 -d | jq -r '.vmid // ""')
-  [[ -n "$host" ]] || continue
-  collect_pve_cmd "$host" "$vmid" qm-status qm status "$vmid" --verbose
-  collect_pve_cmd "$host" "$vmid" qm-config qm config "$vmid"
-  collect_pve_serial "$host" "$vmid"
-  collect_guest_agent_cmd "$host" "$vmid" ping "true"
-  collect_guest_agent_cmd "$host" "$vmid" ip-addr "ip addr || true"
-  collect_guest_agent_cmd "$host" "$vmid" uname "uname -a || true"
-  collect_guest_agent_cmd "$host" "$vmid" journal "journalctl -b --no-pager | tail -n 300 || true"
-  collect_cmd "$host" "$ip" dmesg "sudo dmesg || dmesg"
-  collect_cmd "$host" "$ip" journal "sudo journalctl -b --no-pager || journalctl -b --no-pager"
-  collect_cmd "$host" "$ip" ip-link "ip link"
-  collect_cmd "$host" "$ip" ip-addr "ip addr"
-  collect_cmd "$host" "$ip" uname "uname -a"
-  collect_cmd "$host" "$ip" kernel-rpms "rpm -qa 'kernel*' | sort || true"
-  collect_cmd "$host" "$ip" kernel-boot "sudo grubby --info=DEFAULT || true; findmnt / || true; cat /proc/cmdline || true"
-  collect_cmd "$host" "$ip" testbed-tmp "sudo sh -c 'ls -la /tmp/pulsaros-testbed 2>/dev/null || true; for f in /tmp/pulsaros-testbed/*.log; do [ -f \"\$f\" ] || continue; echo === \"\$f\"; cat \"\$f\"; done'"
+  wait_for_collect_slot
+  collect_host "$entry" &
+  collect_pids+=("$!")
 done
+collect_failed=0
+for pid in "${collect_pids[@]}"; do
+  if ! wait "$pid"; then
+    collect_failed=1
+  fi
+done
+(( collect_failed == 0 )) || warn "one or more host collection workers failed"
 
 if [[ -n "${VTEP_A_IP:-}" ]]; then
   copy_pcap vtep-a "${VTEP_A_IP:-}" /tmp/pulsaros-testbed/vtep-a-underlay.pcap pcaps/vtep-a-underlay.pcap
