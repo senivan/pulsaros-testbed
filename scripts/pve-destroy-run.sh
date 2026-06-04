@@ -26,6 +26,10 @@ sdn_apply() {
 RUN_ID="${1:-}"
 [[ "$RUN_ID" =~ ^[0-9]+$ ]] || die "usage: $0 RUN_ID"
 REQUESTED_RUN_ID="$RUN_ID"
+PVE_DESTROY_JOBS="${PVE_DESTROY_JOBS:-6}"
+[[ "$PVE_DESTROY_JOBS" =~ ^[1-9][0-9]*$ ]] || die "PVE_DESTROY_JOBS must be a positive integer"
+destroy_status_dir="$(mktemp -d)"
+trap 'rm -rf "$destroy_status_dir"' EXIT
 state_cmd() {
   if [[ -f artifacts/topology.json || -f artifacts/run-state.json ]]; then
     ./scripts/run-state.py "$@" --run-id "$REQUESTED_RUN_ID" || true
@@ -49,36 +53,102 @@ elif [[ ! -f artifacts/topology.json ]]; then
   CLIENT_B_NAME="pulsar-${REQUESTED_RUN_ID}-client-b"
 fi
 
+safe_status_name() {
+  local name="$1"
+  printf '%s' "${name//[^A-Za-z0-9_.-]/_}"
+}
+
+record_destroy_status() {
+  local host="$1" status="$2" message="${3:-}" safe_host
+  safe_host="$(safe_status_name "$host")"
+  printf '%s\t%s\t%s\n' "$host" "$status" "$message" > "$destroy_status_dir/${safe_host}.status"
+}
+
+flush_destroy_statuses() {
+  local status_file host status message
+  for status_file in "$destroy_status_dir"/*.status; do
+    [[ -e "$status_file" ]] || return 0
+    IFS=$'\t' read -r host status message < "$status_file"
+    if [[ "$status" == "unsafe" ]]; then
+      state_cmd phase destroy --status unsafe --message "$message"
+    else
+      state_cmd vm "$host" "$status"
+    fi
+  done
+}
+
 destroy_one() {
   local host="$1" vmid="$2" expected_name="$3" actual_name
   if ! run_pve qm status "$vmid" >/dev/null 2>&1; then
     log "VMID $vmid missing; skipping"
-    state_cmd vm "$host" missing
+    record_destroy_status "$host" missing
     return 0
   fi
   actual_name=$(run_pve qm config "$vmid" | awk -F': ' '/^name:/ {print $2}')
   if [[ "$actual_name" != "$expected_name" ]]; then
     warn "VMID $vmid name is $actual_name, expected $expected_name; refusing to destroy"
-    state_cmd phase destroy --status unsafe --message "VMID $vmid name mismatch: $actual_name != $expected_name"
-    die "unsafe VMID name mismatch for $vmid"
+    record_destroy_status "$host" unsafe "VMID $vmid name mismatch: $actual_name != $expected_name"
+    return 1
   fi
   log "Stopping $expected_name ($vmid)"
   run_pve qm stop "$vmid" --skiplock 1 || true
   log "Destroying $expected_name ($vmid)"
   run_pve qm destroy "$vmid" --purge 1 || true
-  state_cmd vm "$host" destroyed
+  record_destroy_status "$host" destroyed
 }
 
+verify_destroy_targets() {
+  local entry host vmid expected_name actual_name
+  for entry in "${destroy_entries[@]}"; do
+    IFS=$'\t' read -r host vmid expected_name <<<"$entry"
+    if ! run_pve qm status "$vmid" >/dev/null 2>&1; then
+      continue
+    fi
+    actual_name=$(run_pve qm config "$vmid" | awk -F': ' '/^name:/ {print $2}')
+    if [[ "$actual_name" != "$expected_name" ]]; then
+      state_cmd phase destroy --status unsafe --message "VMID $vmid name mismatch: $actual_name != $expected_name"
+      die "unsafe VMID name mismatch for $vmid"
+    fi
+  done
+}
+
+wait_for_destroy_slot() {
+  while (( $(jobs -pr | wc -l | tr -d '[:space:]') >= PVE_DESTROY_JOBS )); do
+    sleep 0.2
+  done
+}
+
+start_destroy_one() {
+  wait_for_destroy_slot
+  destroy_one "$@" &
+  destroy_pids+=("$!")
+}
+
+log "Destroying VMs with $PVE_DESTROY_JOBS workers"
+destroy_pids=()
 if [[ -f artifacts/topology.json ]]; then
-  while IFS=$'\t' read -r host vmid vm_name; do
-    destroy_one "$host" "$vmid" "$vm_name"
-  done < <(jq -r '.hosts[] | [.name, .vmid, .vm_name] | @tsv' artifacts/topology.json)
+  mapfile -t destroy_entries < <(jq -r '.hosts[] | [.name, .vmid, .vm_name] | @tsv' artifacts/topology.json)
 else
-  destroy_one client-a "$CLIENT_A" "$CLIENT_A_NAME"
-  destroy_one vtep-a "$VTEP_A" "$VTEP_A_NAME"
-  destroy_one vtep-b "$VTEP_B" "$VTEP_B_NAME"
-  destroy_one client-b "$CLIENT_B" "$CLIENT_B_NAME"
+  destroy_entries=(
+    $'client-a\t'"$CLIENT_A"$'\t'"$CLIENT_A_NAME"
+    $'vtep-a\t'"$VTEP_A"$'\t'"$VTEP_A_NAME"
+    $'vtep-b\t'"$VTEP_B"$'\t'"$VTEP_B_NAME"
+    $'client-b\t'"$CLIENT_B"$'\t'"$CLIENT_B_NAME"
+  )
 fi
+verify_destroy_targets
+for entry in "${destroy_entries[@]}"; do
+  IFS=$'\t' read -r host vmid vm_name <<<"$entry"
+  start_destroy_one "$host" "$vmid" "$vm_name"
+done
+destroy_failed=0
+for pid in "${destroy_pids[@]}"; do
+  if ! wait "$pid"; then
+    destroy_failed=1
+  fi
+done
+flush_destroy_statuses
+(( destroy_failed == 0 )) || die "one or more VM destroy workers failed"
 
 if [[ "${NETWORK_MODE:-bridge}" == "qinq" && -f artifacts/topology.json ]]; then
   log "Deleting generated QinQ SDN VNets"
