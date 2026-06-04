@@ -10,6 +10,8 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 MODULE_PATH = ROOT / "scripts" / "render-topology.py"
 TOPOLOGY = ROOT / "topologies" / "linux-vxlan-reference.yml"
 MULTI_VTEP_TOPOLOGY = ROOT / "topologies" / "linux-vxlan-3vtep-3lan.yml"
+FOUR_VTEP_FULLMESH_TOPOLOGY = ROOT / "topologies" / "linux-vxlan-4vtep-fullmesh.yml"
+FOUR_VTEP_DUAL_RR_TOPOLOGY = ROOT / "topologies" / "linux-vxlan-4vtep-dual-rr.yml"
 
 
 spec = importlib.util.spec_from_file_location("render_topology", MODULE_PATH)
@@ -130,6 +132,50 @@ def test_multi_vtep_topology_renders_segments(monkeypatch):
     assert data["checks"][-1]["type"] == "segment_perf_probe"
     assert data["faults"][0]["type"] == "bgp_peer_shutdown"
     assert data["faults"][2]["type"] == "vlan_mismatch"
+
+
+def test_four_vtep_fullmesh_topology_renders_evpn_peers(monkeypatch):
+    base_env(monkeypatch)
+
+    data = render_topology.render(FOUR_VTEP_FULLMESH_TOPOLOGY)
+    control_plane = data["control_plane"]
+
+    assert data["name"] == "linux-vxlan-4vtep-fullmesh"
+    assert control_plane["asn"] == 65040
+    assert control_plane["peering"] == "full_mesh"
+    assert sorted(control_plane["hosts"]) == ["vtep-a", "vtep-b", "vtep-c", "vtep-d"]
+    for host, metadata in control_plane["hosts"].items():
+        assert metadata["route_reflector"] is False
+        assert len(metadata["peers"]) == 3
+        assert host not in {peer["host"] for peer in metadata["peers"]}
+        assert metadata["vnis"] == [10400]
+    assert data["checks"][0]["type"] == "evpn_control_plane"
+    assert data["faults"][0]["type"] == "bgp_peer_shutdown"
+
+
+def test_four_vtep_dual_rr_topology_renders_rr_clients(monkeypatch):
+    base_env(monkeypatch)
+
+    data = render_topology.render(FOUR_VTEP_DUAL_RR_TOPOLOGY)
+    control_plane = data["control_plane"]
+
+    assert data["name"] == "linux-vxlan-4vtep-dual-rr"
+    assert control_plane["asn"] == 65050
+    assert control_plane["peering"] == "route_reflector"
+    assert control_plane["route_reflectors"] == ["vtep-a", "vtep-b"]
+    assert control_plane["hosts"]["vtep-a"]["route_reflector"] is True
+    assert control_plane["hosts"]["vtep-b"]["route_reflector"] is True
+    assert {peer["host"] for peer in control_plane["hosts"]["vtep-c"]["peers"]} == {"vtep-a", "vtep-b"}
+    assert {peer["host"] for peer in control_plane["hosts"]["vtep-d"]["peers"]} == {"vtep-a", "vtep-b"}
+    rr_client_peers = [
+        peer
+        for peer in control_plane["hosts"]["vtep-a"]["peers"]
+        if peer["route_reflector_client"]
+    ]
+    assert {peer["host"] for peer in rr_client_peers} == {"vtep-c", "vtep-d"}
+    assert control_plane["hosts"]["vtep-c"]["vnis"] == [10500]
+    assert data["checks"][0]["type"] == "evpn_control_plane"
+    assert data["faults"][0]["type"] == "frr_restart"
 
 
 def write_topology(tmp_path, checks, extra=""):

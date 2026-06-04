@@ -20,6 +20,11 @@ Bundled VXLAN topologies use `control_plane: {type: evpn}` and FRR BGP EVPN to
 exchange VTEP reachability. Client members can be untagged access interfaces or
 trunk members configured as guest VLAN subinterfaces.
 
+The bundled FRR EVPN examples include a two-VTEP full mesh, a three-VTEP
+single route-reflector topology, a four-VTEP full mesh, and a four-VTEP dual
+route-reflector topology. The four-VTEP examples are intended to make the FRR
+control-plane graph easy to inspect without adding multiple tenant segments.
+
 ## Default QinQ Mode
 
 `NETWORK_MODE=qinq` is the default. Each run creates one QinQ zone and one VNet

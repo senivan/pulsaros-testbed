@@ -142,6 +142,17 @@ Trunks:      VLAN-tagged clients on green
 Underlay:    shared VTEP underlay network
 ```
 
+Additional FRR EVPN control-plane examples focus on peering shape:
+
+```text
+topologies/linux-vxlan-4vtep-fullmesh.yml
+topologies/linux-vxlan-4vtep-dual-rr.yml
+
+VTEPs:       vtep-a, vtep-b, vtep-c, vtep-d
+Segment:     tenant-a
+Control:     full mesh, or dual route-reflector with vtep-a/vtep-b as RRs
+```
+
 Validate a topology without touching Proxmox:
 
 ```bash
