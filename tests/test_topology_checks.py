@@ -260,6 +260,48 @@ def _run_segment_perf_probe_check(topology, ssh_user, ssh_key, check):
             )
 
 
+def _run_evpn_control_plane_check(topology, ssh_user, ssh_key, check):
+    control_plane = topology["__resolved__"].get("control_plane", {})
+    if control_plane.get("type") != "evpn":
+        pytest.fail(f"{check['name']}: topology control_plane is not evpn")
+    timeout = _check_value(check, "timeout", 60)
+
+    for host_name, host in control_plane.get("hosts", {}).items():
+        ssh(
+            topology,
+            ssh_user,
+            ssh_key,
+            host_name,
+            "sudo -n systemctl is-active --quiet frr",
+            timeout=timeout,
+        )
+        summary = ssh(
+            topology,
+            ssh_user,
+            ssh_key,
+            host_name,
+            "sudo -n vtysh -c 'show bgp l2vpn evpn summary'",
+            timeout=timeout,
+        ).stdout
+        for peer in host.get("peers", []):
+            if peer["address"] not in summary:
+                pytest.fail(
+                    f"{check['name']}: {host_name} EVPN summary missing peer "
+                    f"{peer['address']}:\n{summary}"
+                )
+        vni_text = ssh(
+            topology,
+            ssh_user,
+            ssh_key,
+            host_name,
+            "sudo -n vtysh -c 'show evpn vni'",
+            timeout=timeout,
+        ).stdout
+        for vni in host.get("vnis", []):
+            if str(vni) not in vni_text:
+                pytest.fail(f"{check['name']}: {host_name} missing VNI {vni}:\n{vni_text}")
+
+
 def _pcap_name(check_name, capture):
     raw = f"{check_name}-{capture['host']}-{capture['nic']}.pcap"
     return re.sub(r"[^A-Za-z0-9_.-]", "-", raw)
@@ -580,5 +622,7 @@ def test_topology_check(topology, ssh_user, ssh_key, topology_check):
         _run_segment_bidirectional_capture_check(topology, ssh_user, ssh_key, topology_check)
     elif topology_check["type"] == "segment_perf_probe":
         _run_segment_perf_probe_check(topology, ssh_user, ssh_key, topology_check)
+    elif topology_check["type"] == "evpn_control_plane":
+        _run_evpn_control_plane_check(topology, ssh_user, ssh_key, topology_check)
     else:
         pytest.fail(f"unsupported topology check type: {topology_check['type']}")

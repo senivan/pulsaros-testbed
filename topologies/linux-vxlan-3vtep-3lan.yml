@@ -1,6 +1,6 @@
 schema_version: 1
 name: linux-vxlan-3vtep-3lan
-description: Three-VTEP static VXLAN mesh with access and trunk client LANs.
+description: Three-VTEP VXLAN EVPN topology with access and trunk client LANs.
 
 networks:
   underlay:
@@ -340,6 +340,13 @@ segments:
         vlan: 30
         ip: 10.10.30.13/24
 
+control_plane:
+  type: evpn
+  asn: 65000
+  peering: route_reflector
+  route_reflectors:
+    - vtep-a
+
 plays:
   - name: Provision all testbed VMs
     hosts: all
@@ -353,13 +360,22 @@ plays:
     roles:
       - hugepages
       - dpdk
-  - name: Configure static multi-VTEP VXLAN topology
+  - name: Configure multi-VTEP VXLAN EVPN topology
     hosts: all
     become: true
     roles:
       - vxlan-test
+  - name: Configure FRR EVPN control plane
+    hosts: vteps
+    become: true
+    roles:
+      - frr-evpn
 
 checks:
+  - name: evpn-control-plane
+    type: evpn_control_plane
+    timeout: 60
+
   - name: red-lan-ping-matrix
     type: segment_ping_matrix
     segment: red
@@ -418,9 +434,10 @@ checks:
       max_rtt_avg_ms: 10
 
 faults:
-  - name: red-remove-fdb-a-to-b
-    type: remove_fdb_peer
+  - name: red-bgp-peer-shutdown-a-to-b
+    type: bgp_peer_shutdown
     segment: red
+    settle: 5
     recover_timeout: 45
     pairs:
       - source: red-client-a.data

@@ -148,10 +148,12 @@ Validate a topology without touching Proxmox:
 ./scripts/render-topology.py validate --topology-file topologies/linux-vxlan-3vtep-3lan.yml
 ```
 
-## VXLAN Experiment Semantics
+## VXLAN EVPN Experiment Semantics
 
-The current VXLAN implementation is deliberately explicit. It uses Linux
-bridges, Linux VXLAN devices, static VTEP flood entries, and `nolearning`.
+The current VXLAN implementation uses Linux bridges and Linux VXLAN devices for
+the dataplane, with FRR providing the EVPN control plane for bundled tests.
+Static VXLAN flood entries remain a compatibility path for topologies without
+`control_plane: {type: evpn}`.
 
 For each topology segment, the Ansible role configures:
 
@@ -159,7 +161,7 @@ For each topology segment, the Ansible role configures:
 - one VXLAN device named from the VNI, for example `vx-10100`
 - one VNI per segment
 - one underlay address per participating VTEP
-- static FDB flood entries between VTEPs
+- FRR BGP EVPN peering between VTEPs
 - local access NICs or trunk VLAN subinterfaces for clients
 
 The expected properties are:
@@ -169,6 +171,7 @@ The expected properties are:
 - decoded pcaps contain the expected VNI
 - decoded pcaps preserve expected inner client IPs
 - decoded pcaps use expected outer VTEP underlay IPs
+- FRR reports the expected EVPN peers and VNIs
 - trunk clients communicate only on the declared VLAN
 - injected faults affect the intended path
 - restore operations recover the path without rebuilding the testbed
@@ -198,6 +201,7 @@ Topology `checks:` define normal expected behavior. Supported check types are:
 - `ping`
 - `packet_capture`
 - `pktgen_dpdk`
+- `evpn_control_plane`
 - `segment_ping_matrix`
 - `segment_bidirectional_capture`
 - `segment_perf_probe`
@@ -224,9 +228,9 @@ scenario and write:
 artifacts/fault-results.json
 ```
 
-Current injected failures are:
+Current injected failures include:
 
-- `remove_fdb_peer`: remove VXLAN forwarding state and expect overlay traffic to fail
+- `bgp_peer_shutdown`: shut an FRR EVPN peer and expect overlay traffic to fail
 - `mtu_mismatch`: lower MTU and expect large DF traffic to fail
 - `vlan_mismatch`: move a trunk client onto the wrong VLAN and expect traffic to fail
 - `bounce_vtep_underlay`: bring down a VTEP underlay interface and expect traffic to fail

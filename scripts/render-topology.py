@@ -341,6 +341,119 @@ def resolve_segments(hosts, segments):
     return resolved
 
 
+def segment_vtep_hosts(segments):
+    return sorted(
+        {
+            vtep["host"]
+            for segment in segments.values()
+            for vtep in segment.get("vteps", [])
+        }
+    )
+
+
+def vtep_underlays(segments):
+    underlays = {}
+    for segment in segments.values():
+        for vtep in segment.get("vteps", []):
+            host = vtep["host"]
+            current = {
+                "host": host,
+                "underlay_nic": vtep["underlay_nic"],
+                "underlay_mac": vtep["underlay_mac"],
+                "underlay_ip": vtep["underlay_ip"],
+                "underlay_address": vtep["underlay_address"],
+            }
+            if host in underlays and underlays[host] != current:
+                die(f"host {host} has conflicting EVPN underlay definitions")
+            underlays[host] = current
+    return underlays
+
+
+def validate_control_plane(hosts, segments, control_plane):
+    if control_plane in (None, ""):
+        return {"type": "static"}
+    if not isinstance(control_plane, dict):
+        die("control_plane must be a mapping")
+
+    cp_type = control_plane.get("type", "static")
+    if cp_type not in ("static", "evpn"):
+        die("control_plane type must be static or evpn")
+    if cp_type == "static":
+        return {"type": "static"}
+
+    if not segments:
+        die("control_plane evpn requires at least one segment")
+    asn = int(control_plane.get("asn", 65000))
+    if asn < 1 or asn > 4294967295:
+        die("control_plane asn must be between 1 and 4294967295")
+    peering = control_plane.get("peering", "full_mesh")
+    if peering not in ("full_mesh", "route_reflector"):
+        die("control_plane peering must be full_mesh or route_reflector")
+
+    vtep_hosts = segment_vtep_hosts(segments)
+    for host in vtep_hosts:
+        validate_host_ref(hosts, host, "control_plane evpn")
+
+    route_reflectors = control_plane.get("route_reflectors", [])
+    if route_reflectors in (None, ""):
+        route_reflectors = []
+    if not isinstance(route_reflectors, list) or not all(isinstance(host, str) for host in route_reflectors):
+        die("control_plane route_reflectors must be a list of host names")
+    if peering == "route_reflector" and not route_reflectors:
+        die("control_plane route_reflector peering requires route_reflectors")
+    if peering == "full_mesh" and route_reflectors:
+        die("control_plane full_mesh peering does not use route_reflectors")
+    for host in route_reflectors:
+        if host not in vtep_hosts:
+            die(f"control_plane route_reflectors references non-VTEP host {host}")
+    validate_unique(route_reflectors, "control_plane route_reflector")
+
+    return {
+        "type": "evpn",
+        "asn": asn,
+        "peering": peering,
+        "route_reflectors": route_reflectors,
+    }
+
+
+def resolve_control_plane(control_plane, segments):
+    if control_plane["type"] != "evpn":
+        return control_plane
+
+    underlays = vtep_underlays(segments)
+    vtep_hosts = sorted(underlays)
+    route_reflectors = set(control_plane.get("route_reflectors", []))
+    hosts = {}
+    for host in vtep_hosts:
+        if control_plane["peering"] == "full_mesh":
+            peer_hosts = [peer for peer in vtep_hosts if peer != host]
+        elif host in route_reflectors:
+            peer_hosts = [peer for peer in vtep_hosts if peer != host]
+        else:
+            peer_hosts = sorted(route_reflectors)
+        peers = []
+        for peer in peer_hosts:
+            peers.append(
+                {
+                    "host": peer,
+                    "address": underlays[peer]["underlay_address"],
+                    "route_reflector_client": host in route_reflectors and peer not in route_reflectors,
+                }
+            )
+        hosts[host] = {
+            **underlays[host],
+            "router_id": underlays[host]["underlay_address"],
+            "route_reflector": host in route_reflectors,
+            "peers": peers,
+            "vnis": sorted(segment["vni"] for segment in segments.values()),
+        }
+
+    return {
+        **control_plane,
+        "hosts": hosts,
+    }
+
+
 def validate_segment_ping_matrix_check(segments, check, label):
     segment_name = check.get("segment")
     if not segment_name:
@@ -394,8 +507,16 @@ def validate_segment_perf_probe_check(segments, check, label):
             die(f"{label} thresholds {key} must be non-negative")
 
 
-def validate_checks(hosts, checks, segments=None):
+def validate_evpn_control_plane_check(control_plane, check, label):
+    if control_plane.get("type") != "evpn":
+        die(f"{label} requires control_plane type evpn")
+    if "timeout" in check and int(check["timeout"]) < 1:
+        die(f"{label} timeout must be at least 1")
+
+
+def validate_checks(hosts, checks, segments=None, control_plane=None):
     segments = segments or {}
+    control_plane = control_plane or {"type": "static"}
     if checks in (None, []):
         return []
     if not isinstance(checks, list):
@@ -422,20 +543,30 @@ def validate_checks(hosts, checks, segments=None):
             validate_segment_bidirectional_capture_check(hosts, segments, check, f"check {name}")
         elif check_type == "segment_perf_probe":
             validate_segment_perf_probe_check(segments, check, f"check {name}")
+        elif check_type == "evpn_control_plane":
+            validate_evpn_control_plane_check(control_plane, check, f"check {name}")
         else:
             die(f"check {name} has unsupported type {check_type}")
     validate_unique(names, "check name")
     return checks
 
 
-def validate_faults(hosts, faults, segments=None):
+def validate_faults(hosts, faults, segments=None, control_plane=None):
     segments = segments or {}
+    control_plane = control_plane or {"type": "static"}
     if faults in (None, []):
         return []
     if not isinstance(faults, list):
         die("faults must be a list")
     names = []
-    supported = {"remove_fdb_peer", "mtu_mismatch", "vlan_mismatch", "bounce_vtep_underlay"}
+    supported = {
+        "remove_fdb_peer",
+        "mtu_mismatch",
+        "vlan_mismatch",
+        "bounce_vtep_underlay",
+        "bgp_peer_shutdown",
+        "frr_restart",
+    }
     for index, fault in enumerate(faults):
         label = f"fault {index}"
         if not isinstance(fault, dict):
@@ -447,6 +578,8 @@ def validate_faults(hosts, faults, segments=None):
         fault_type = fault.get("type")
         if fault_type not in supported:
             die(f"fault {name} has unsupported type {fault_type}")
+        if fault_type in ("bgp_peer_shutdown", "frr_restart") and control_plane.get("type") != "evpn":
+            die(f"fault {name} requires control_plane type evpn")
         segment_name = fault.get("segment")
         if segment_name not in segments:
             die(f"fault {name} references unknown segment {segment_name}")
@@ -468,6 +601,8 @@ def validate_faults(hosts, faults, segments=None):
                 member_vlan = int(member.get("vlan", segments[segment_name].get("vlan")))
                 if fault_vlan == member_vlan:
                     die(f"fault {name} fault_vlan must differ from source VLAN")
+        if fault_type == "remove_fdb_peer" and control_plane.get("type") == "evpn":
+            die(f"fault {name} is only valid for static VXLAN control plane")
         if "recover_timeout" in fault and int(fault["recover_timeout"]) < 1:
             die(f"fault {name} recover_timeout must be at least 1")
     validate_unique(names, "fault name")
@@ -579,6 +714,8 @@ def render(topology_path, previous=None):
         }
     validate_unique(all_mac_offsets, "mac_offset")
     segments = validate_segments(hosts, source.get("segments", {}))
+    resolved_segments = resolve_segments(hosts, segments)
+    control_plane = validate_control_plane(hosts, resolved_segments, source.get("control_plane"))
     resolved = {
         "schema_version": 1,
         "name": source["name"],
@@ -589,7 +726,8 @@ def render(topology_path, previous=None):
         "network_mode": network_mode,
         "networks": networks,
         "hosts": hosts,
-        "segments": resolve_segments(hosts, segments),
+        "segments": resolved_segments,
+        "control_plane": resolve_control_plane(control_plane, resolved_segments),
         "plays": source.get("plays", []),
         "compat": source.get("compat", {}),
     }
@@ -601,9 +739,19 @@ def render(topology_path, previous=None):
             "mtu": env_int("QINQ_MTU", 1496),
             "ipam": env_str("QINQ_IPAM", "pve"),
         }
-    checks = validate_checks(hosts, source.get("checks", []), resolved["segments"])
+    checks = validate_checks(
+        hosts,
+        source.get("checks", []),
+        resolved["segments"],
+        resolved["control_plane"],
+    )
     resolved["checks"] = resolve_tokens(resolved, {}, checks)
-    faults = validate_faults(hosts, source.get("faults", []), resolved["segments"])
+    faults = validate_faults(
+        hosts,
+        source.get("faults", []),
+        resolved["segments"],
+        resolved["control_plane"],
+    )
     resolved["faults"] = resolve_tokens(resolved, {}, faults)
     return resolved
 

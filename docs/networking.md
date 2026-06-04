@@ -16,8 +16,9 @@ Topology files define the logical dataplane networks. The renderer maps those
 logical networks to either generated QinQ VNets or legacy bridge VLAN tags.
 VXLAN behavior is described separately with topology `segments`: each segment
 declares the VNI, participating VTEPs, local VTEP LAN NICs, and client members.
-Client members can be untagged access interfaces or trunk members configured as
-guest VLAN subinterfaces.
+Bundled VXLAN topologies use `control_plane: {type: evpn}` and FRR BGP EVPN to
+exchange VTEP reachability. Client members can be untagged access interfaces or
+trunk members configured as guest VLAN subinterfaces.
 
 ## Default QinQ Mode
 
@@ -93,7 +94,7 @@ client-b:
   net1 = right-l2
 ```
 
-Linux VXLAN reference values:
+Linux VXLAN EVPN reference values:
 
 ```text
 client-a dataplane: 10.10.0.1/24
@@ -102,6 +103,8 @@ vtep-a underlay:    172.16.100.1/30
 vtep-b underlay:    172.16.100.2/30
 VNI:                100
 UDP port:           4789
+EVPN ASN:           65000
+Peering:            full mesh
 ```
 
 The default topology also declares a `pktgen_dpdk` check from `client-a` on its

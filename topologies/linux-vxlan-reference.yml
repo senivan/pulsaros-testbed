@@ -1,6 +1,6 @@
 schema_version: 1
 name: linux-vxlan-reference
-description: Four-VM Linux VXLAN reference topology.
+description: Four-VM Linux VXLAN EVPN reference topology.
 
 networks:
   left-l2:
@@ -124,6 +124,11 @@ segments:
         mode: access
         ip: 10.10.0.2/24
 
+control_plane:
+  type: evpn
+  asn: 65000
+  peering: full_mesh
+
 plays:
   - name: Provision all testbed VMs
     hosts: all
@@ -143,13 +148,22 @@ plays:
     roles:
       - hugepages
       - traffic-tools
-  - name: Configure Linux VXLAN reference topology
+  - name: Configure Linux VXLAN EVPN reference topology
     hosts: all
     become: true
     roles:
       - vxlan-test
+  - name: Configure FRR EVPN control plane
+    hosts: vteps
+    become: true
+    roles:
+      - frr-evpn
 
 checks:
+  - name: evpn-control-plane
+    type: evpn_control_plane
+    timeout: 60
+
   - name: overlay-ping
     type: ping
     source: client-a

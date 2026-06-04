@@ -20,8 +20,14 @@
     - hugepages
     - traffic-tools
 
-- name: Configure Linux VXLAN reference topology
+- name: Configure Linux VXLAN EVPN reference topology
   hosts: all
   become: true
   roles:
     - vxlan-test
+
+- name: Configure FRR EVPN control plane
+  hosts: vteps
+  become: true
+  roles:
+    - frr-evpn

@@ -42,15 +42,19 @@ networks, hosts, NICs, Ansible host variables, generated playbook roles, and
 scenario acceptance checks. Compatibility aliases are still rendered for older
 scripts, but topology-specific pytest assertions should consume the resolved
 JSON and the topology-declared `checks:` section instead of hard-coding host
-names. The generic topology check runner supports ping checks, tcpdump-backed
-packet capture checks with decoded-output assertions, bidirectional segment
-capture checks, and client-side `pktgen_dpdk` traffic generation checks.
+names. The generic topology check runner supports ping checks, FRR EVPN
+control-plane checks, tcpdump-backed packet capture checks with decoded-output
+assertions, bidirectional segment capture checks, and client-side `pktgen_dpdk`
+traffic generation checks.
 
 Topologies may also declare `segments` for topology-driven Linux VXLAN
 configuration. Each segment defines one VNI, participating VTEPs, local VTEP
 LAN NICs, and access or trunk client members. The `vxlan-test` Ansible role
-reads the resolved topology JSON and configures static VXLAN flood entries
-between all VTEPs in a segment.
+reads the resolved topology JSON and configures the Linux bridge/VXLAN
+dataplane. For bundled EVPN topologies, the `frr-evpn` role configures FRR BGP
+EVPN peering and FRR handles remote VTEP reachability. Static VXLAN flood
+entries are only configured for topologies without `control_plane: {type:
+evpn}`.
 
 The GitHub runner does not host the test workload. It only calls Proxmox tools,
 runs Ansible over SSH, invokes pytest, and uploads artifacts.
