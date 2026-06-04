@@ -57,6 +57,10 @@ EVPN peering and FRR handles remote VTEP reachability. Static VXLAN flood
 entries are only configured for topologies without `control_plane: {type:
 evpn}`.
 
+The four-VTEP topologies are control-plane-focused examples: one renders a
+full-mesh FRR EVPN graph, and one renders a dual route-reflector graph where
+two VTEPs serve as route reflectors for the remaining VTEPs.
+
 The GitHub runner does not host the test workload. It only calls Proxmox tools,
 runs Ansible over SSH, invokes pytest, and uploads artifacts.
 
