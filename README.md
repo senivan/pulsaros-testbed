@@ -87,7 +87,7 @@ Each run follows this lifecycle:
 ```text
 render topology
 create Proxmox VMs and SDN objects
-wait for qemu guest agent and SSH
+wait concurrently for qemu guest agent and SSH
 generate Ansible inventory and playbook
 provision guests
 run selected scenario
@@ -394,6 +394,7 @@ The Proxmox host needs:
 
 - Proxmox VE with `qm`, `pvesh`, `pvesm`, `pvecm`, and `/etc/pve`
 - a VM template, default `9000`
+- linked-clone support for the VM template, unless `PVE_FULL_CLONE=1`
 - a management bridge, default `vmbr0`
 - a Proxmox SDN parent bridge, default `vmbr-test`
 - SDN support available through `pvesh`
@@ -418,6 +419,7 @@ pulsaros-testbed
 
 The VM template needs:
 
+- to be usable as a linked-clone base for the default fast path
 - qemu guest agent installed and enabled
 - SSH enabled
 - a non-root SSH user, default `pulsar`
@@ -428,6 +430,10 @@ The VM template needs:
 ## Networking Modes
 
 Default mode is `NETWORK_MODE=qinq`.
+
+VM creation uses linked clones by default because the testbed validates network
+functionality, not storage isolation. Set `PVE_FULL_CLONE=1` to use full clones;
+in that mode `STORAGE` selects the target Proxmox storage.
 
 In QinQ mode, each run creates disposable Proxmox SDN objects on top of
 `SDN_BRIDGE`. Generated names are derived from the run suffix:

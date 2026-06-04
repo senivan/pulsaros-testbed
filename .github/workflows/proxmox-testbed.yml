@@ -22,9 +22,17 @@ on:
         required: true
         default: "9000"
       storage:
-        description: "Proxmox storage target"
+        description: "Proxmox storage target for full clones"
         required: true
         default: "local-lvm"
+      pve_full_clone:
+        description: "Use full clones instead of linked clones"
+        required: true
+        default: "0"
+        type: choice
+        options:
+          - "0"
+          - "1"
       mgmt_bridge:
         description: "Management bridge"
         required: true
@@ -202,6 +210,7 @@ jobs:
       TOPOLOGY: ${{ inputs.topology }}
       TEMPLATE_ID: ${{ inputs.template_vmid }}
       STORAGE: ${{ inputs.storage }}
+      PVE_FULL_CLONE: ${{ inputs.pve_full_clone }}
       MGMT_BRIDGE: ${{ inputs.mgmt_bridge }}
       NETWORK_MODE: ${{ inputs.network_mode }}
       SDN_BRIDGE: ${{ inputs.sdn_bridge }}
