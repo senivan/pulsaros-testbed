@@ -272,7 +272,12 @@ jobs:
         run: ./scripts/pve-generate-inventory.sh "$RUN_ID"
 
       - name: Provision VMs
-        run: ansible-playbook -i ansible/inventory.generated.ini ansible/site.generated.yml
+        run: |
+          ansible-playbook \
+            -i ansible/inventory.generated.ini \
+            ansible/site.generated.yml \
+            -vv \
+            --forks "$ANSIBLE_FORKS"
 
       - name: Run scenario
         run: ./scripts/pve-run-scenario.sh "$SCENARIO"
