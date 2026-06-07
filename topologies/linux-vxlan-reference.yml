@@ -217,6 +217,46 @@ checks:
     duration: 5
     timeout: 30
 
+  - name: default-lan-ping-matrix
+    type: segment_ping_matrix
+    segment: default-lan
+    count: 3
+    wait: 2
+    timeout: 45
+
+  - name: default-lan-vxlan-underlay-capture
+    type: segment_bidirectional_capture
+    segment: default-lan
+    count: 3
+    wait: 2
+    timeout: 45
+    captures:
+      - host: vtep-a
+        nic: underlay
+        filter: udp port 4789
+      - host: vtep-b
+        nic: underlay
+        filter: udp port 4789
+    assertions:
+      min_packets: 3
+      contains:
+        - VXLAN
+
+  - name: default-lan-perf-probe
+    type: segment_perf_probe
+    segment: default-lan
+    count: 10
+    wait: 2
+    timeout: 45
+    pairs:
+      - source: client-a.left
+        destination: client-b.right
+      - source: client-b.right
+        destination: client-a.left
+    thresholds:
+      max_loss_percent: 0
+      max_rtt_avg_ms: 10
+
 compat:
   CLIENT_A: "@host:client-a.vmid"
   VTEP_A: "@host:vtep-a.vmid"

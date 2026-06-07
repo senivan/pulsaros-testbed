@@ -268,6 +268,23 @@ checks:
       contains:
         - VXLAN
 
+  - name: tenant-a-perf-probe
+    type: segment_perf_probe
+    segment: tenant-a
+    count: 10
+    wait: 2
+    timeout: 45
+    pairs:
+      - source: client-a.data
+        destination: client-b.data
+      - source: client-a.data
+        destination: client-c.data
+      - source: client-a.data
+        destination: client-d.data
+    thresholds:
+      max_loss_percent: 0
+      max_rtt_avg_ms: 10
+
 faults:
   - name: tenant-a-bgp-peer-shutdown-a-to-d
     type: bgp_peer_shutdown

@@ -176,6 +176,7 @@ def test_four_vtep_dual_rr_topology_renders_rr_clients(monkeypatch):
     assert control_plane["hosts"]["vtep-c"]["vnis"] == [10500]
     assert data["checks"][0]["type"] == "evpn_control_plane"
     assert data["faults"][0]["type"] == "frr_restart"
+    assert data["faults"][0]["expected_impact"] == "no_outage"
 
 
 def write_topology(tmp_path, checks, extra=""):
@@ -811,6 +812,7 @@ def test_faults_accept_access_and_trunk_faults(monkeypatch, tmp_path):
                   - name: vlan-fault
                     type: vlan_mismatch
                     segment: overlay
+                    expected_impact: outage
                     fault_vlan: 31
                     pairs:
                       - source: host-a.data
@@ -818,6 +820,7 @@ def test_faults_accept_access_and_trunk_faults(monkeypatch, tmp_path):
                   - name: underlay-bounce
                     type: bounce_vtep_underlay
                     segment: overlay
+                    expected_impact: no_outage
                     pairs:
                       - source: host-a.data
                         destination: host-b.data
@@ -833,6 +836,55 @@ def test_faults_accept_access_and_trunk_faults(monkeypatch, tmp_path):
         "vlan_mismatch",
         "bounce_vtep_underlay",
     ]
+    assert [fault["expected_impact"] for fault in data["faults"]] == [
+        "outage",
+        "no_outage",
+    ]
+
+
+def test_fault_rejects_unknown_expected_impact(monkeypatch, tmp_path):
+    base_env(monkeypatch)
+    topology = write_topology(
+        tmp_path,
+        "  []",
+        textwrap.indent(
+            textwrap.dedent(
+                """
+                segments:
+                  overlay:
+                    vni: 100
+                    vteps:
+                      - host: host-a
+                        underlay_nic: data
+                        underlay_ip: 172.16.0.1/24
+                      - host: host-b
+                        underlay_nic: data
+                        underlay_ip: 172.16.0.2/24
+                    members:
+                      - host: host-a
+                        nic: data
+                        mode: access
+                        ip: 10.10.0.1/24
+                      - host: host-b
+                        nic: data
+                        mode: access
+                        ip: 10.10.0.2/24
+                faults:
+                  - name: bad-fault
+                    type: remove_fdb_peer
+                    segment: overlay
+                    expected_impact: degraded
+                    pairs:
+                      - source: host-a.data
+                        destination: host-b.data
+                """
+            ).strip(),
+            "            ",
+        ),
+    )
+
+    with pytest.raises(SystemExit):
+        render_topology.render(topology)
 
 
 def test_fault_rejects_missing_pair(monkeypatch, tmp_path):

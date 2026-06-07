@@ -118,11 +118,25 @@ def _ping(topology, ssh_user, ssh_key, source_host, destination_ip, *, size=None
     )
 
 
-def _assert_down(result, fault_name):
+def _expected_impact(fault):
+    return fault.get("expected_impact", "outage")
+
+
+def _assert_fault_impact(result, fault_name, expected_impact):
     if result.returncode == 255:
-        pytest.fail(f"{fault_name}: ssh failed while checking expected outage:\n{result.stderr}")
-    if result.returncode == 0:
+        pytest.fail(
+            f"{fault_name}: ssh failed while checking expected {expected_impact}:\n"
+            f"{result.stderr}"
+        )
+    if expected_impact == "outage" and result.returncode == 0:
         pytest.fail(f"{fault_name}: traffic stayed reachable during injected fault")
+    if expected_impact == "no_outage" and result.returncode != 0:
+        pytest.fail(
+            f"{fault_name}: traffic dropped during no-outage fault\n"
+            f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+        )
+    if expected_impact not in ("outage", "no_outage"):
+        pytest.fail(f"{fault_name}: unsupported expected_impact {expected_impact}")
 
 
 def _wait_reachable(topology, ssh_user, ssh_key, source_host, destination_ip, timeout):
@@ -294,15 +308,18 @@ def test_fault_injection(fault_definition, request, ssh_user, ssh_key):
     source, destination = _fault_pair(segment, fault_definition)
     destination_ip = _address(destination["ip"])
     recover_timeout = int(fault_definition.get("recover_timeout", 45))
+    expected_impact = _expected_impact(fault_definition)
     result = {
         "name": fault_definition["name"],
         "type": fault_definition["type"],
         "segment": fault_definition["segment"],
+        "expected_impact": expected_impact,
         "source": f"{source['host']}.{source['nic']}",
         "destination": f"{destination['host']}.{destination['nic']}",
         "destination_ip": destination_ip,
         "restored": False,
         "recovered": False,
+        "reachable_during_fault": None,
     }
 
     try:
@@ -350,7 +367,8 @@ def test_fault_injection(fault_definition, request, ssh_user, ssh_key):
                 pytest.fail(f"unsupported fault type: {fault_type}")
 
             result["down_returncode"] = down_result.returncode
-            _assert_down(down_result, fault_definition["name"])
+            result["reachable_during_fault"] = down_result.returncode == 0
+            _assert_fault_impact(down_result, fault_definition["name"], expected_impact)
         finally:
             if restore is not None:
                 restore()

@@ -271,10 +271,28 @@ checks:
       contains:
         - VXLAN
 
+  - name: tenant-a-perf-probe
+    type: segment_perf_probe
+    segment: tenant-a
+    count: 10
+    wait: 2
+    timeout: 45
+    pairs:
+      - source: client-a.data
+        destination: client-b.data
+      - source: client-a.data
+        destination: client-c.data
+      - source: client-a.data
+        destination: client-d.data
+    thresholds:
+      max_loss_percent: 0
+      max_rtt_avg_ms: 10
+
 faults:
   - name: tenant-a-frr-restart-client-c
     type: frr_restart
     segment: tenant-a
+    expected_impact: no_outage
     settle: 5
     recover_timeout: 45
     pairs:

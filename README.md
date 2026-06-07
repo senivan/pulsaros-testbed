@@ -239,25 +239,33 @@ scenario and write:
 artifacts/fault-results.json
 ```
 
-Current injected failures include:
+Current injected faults include:
 
 - `bgp_peer_shutdown`: shut an FRR EVPN peer and expect overlay traffic to fail
 - `mtu_mismatch`: lower MTU and expect large DF traffic to fail
 - `vlan_mismatch`: move a trunk client onto the wrong VLAN and expect traffic to fail
 - `bounce_vtep_underlay`: bring down a VTEP underlay interface and expect traffic to fail
+- `frr_restart`: restart FRR on the attached VTEP; the topology declares whether
+  that restart should drop traffic or remain reachable
+
+Each fault may set `expected_impact`:
+
+- `outage`: default; traffic must fail during the injected fault
+- `no_outage`: traffic must remain reachable at the post-settle probe point
 
 For each fault, the expected sequence is:
 
 ```text
 verify path is healthy
 inject fault
-verify expected outage
+verify expected impact
 restore configuration
 verify path recovers
 record result
 ```
 
-A fault test fails if the outage does not happen or if recovery does not happen.
+A fault test fails if the declared impact does not happen or if recovery does
+not happen.
 
 ## Custom Kernel Validation
 

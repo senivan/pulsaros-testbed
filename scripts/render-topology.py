@@ -567,6 +567,7 @@ def validate_faults(hosts, faults, segments=None, control_plane=None):
         "bgp_peer_shutdown",
         "frr_restart",
     }
+    supported_expected_impacts = {"outage", "no_outage"}
     for index, fault in enumerate(faults):
         label = f"fault {index}"
         if not isinstance(fault, dict):
@@ -578,6 +579,9 @@ def validate_faults(hosts, faults, segments=None, control_plane=None):
         fault_type = fault.get("type")
         if fault_type not in supported:
             die(f"fault {name} has unsupported type {fault_type}")
+        expected_impact = fault.get("expected_impact", "outage")
+        if expected_impact not in supported_expected_impacts:
+            die(f"fault {name} has unsupported expected_impact {expected_impact}")
         if fault_type in ("bgp_peer_shutdown", "frr_restart") and control_plane.get("type") != "evpn":
             die(f"fault {name} requires control_plane type evpn")
         segment_name = fault.get("segment")

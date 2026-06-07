@@ -433,6 +433,48 @@ checks:
       contains:
         - VXLAN
 
+  - name: green-vxlan-underlay-capture
+    type: segment_bidirectional_capture
+    segment: green
+    count: 3
+    wait: 2
+    timeout: 45
+    captures:
+      - host: vtep-a
+        nic: underlay
+        filter: udp port 4789
+      - host: vtep-b
+        nic: underlay
+        filter: udp port 4789
+      - host: vtep-c
+        nic: underlay
+        filter: udp port 4789
+    assertions:
+      min_packets: 3
+      contains:
+        - VXLAN
+
+  - name: blue-vxlan-underlay-capture
+    type: segment_bidirectional_capture
+    segment: blue
+    count: 3
+    wait: 2
+    timeout: 45
+    captures:
+      - host: vtep-a
+        nic: underlay
+        filter: udp port 4789
+      - host: vtep-b
+        nic: underlay
+        filter: udp port 4789
+      - host: vtep-c
+        nic: underlay
+        filter: udp port 4789
+    assertions:
+      min_packets: 3
+      contains:
+        - VXLAN
+
   - name: red-lan-perf-probe
     type: segment_perf_probe
     segment: red
@@ -444,6 +486,36 @@ checks:
         destination: red-client-b.data
       - source: red-client-a.data
         destination: red-client-c.data
+    thresholds:
+      max_loss_percent: 0
+      max_rtt_avg_ms: 10
+
+  - name: green-trunk-perf-probe
+    type: segment_perf_probe
+    segment: green
+    count: 10
+    wait: 2
+    timeout: 45
+    pairs:
+      - source: trunk-client-a.data
+        destination: trunk-client-b.data
+      - source: trunk-client-a.data
+        destination: trunk-client-c.data
+    thresholds:
+      max_loss_percent: 0
+      max_rtt_avg_ms: 10
+
+  - name: blue-lan-perf-probe
+    type: segment_perf_probe
+    segment: blue
+    count: 10
+    wait: 2
+    timeout: 45
+    pairs:
+      - source: blue-client-a.data
+        destination: blue-client-b.data
+      - source: blue-client-a.data
+        destination: blue-client-c.data
     thresholds:
       max_loss_percent: 0
       max_rtt_avg_ms: 10
