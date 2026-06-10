@@ -166,6 +166,12 @@ the dataplane, with FRR providing the EVPN control plane for bundled tests.
 Static VXLAN flood entries remain a compatibility path for topologies without
 `control_plane: {type: evpn}`.
 
+The testbed also deploys the `PulsarOS-vxlan` DPDK dataplane application on
+VTEPs. The Ansible role builds the app from git, renders a per-host config from
+the resolved topology, and runs an initialization smoke check. Linux VXLAN
+remains the traffic-carrying dataplane until `PulsarOS-vxlan` has a persistent
+forwarding loop.
+
 For each topology segment, the Ansible role configures:
 
 - one bridge named from the VNI, for example `br-10100`
@@ -341,6 +347,13 @@ kernel_source=none
 The workflow attempts cleanup and artifact upload even after scenario failure.
 Set `keep_vms_on_failure=true` when debugging guest boot, SSH, provisioning, or
 kernel panic failures.
+
+`PulsarOS-vxlan` deployment can be pointed at another repository or ref with:
+
+```text
+pulsaros_vxlan_repo=https://github.com/senivan/PulsarOS-vxlan.git
+pulsaros_vxlan_ref=main
+```
 
 ## Local Reproduction
 
