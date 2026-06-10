@@ -1,0 +1,212 @@
+---
+- name: Install PulsarOS VXLAN build prerequisites
+  ansible.builtin.shell: |
+    set -euo pipefail
+    dnf install -y \
+      cmake \
+      dpdk \
+      dpdk-devel \
+      gcc \
+      git \
+      libpcap-devel \
+      make \
+      numactl-devel \
+      pkgconf-pkg-config
+  args:
+    executable: /bin/bash
+  changed_when: false
+
+- name: Clone PulsarOS VXLAN repository
+  ansible.builtin.shell: |
+    set -euo pipefail
+    prefix=/opt/pulsaros/vxlan
+    source_dir="${prefix}/source"
+    repo="${PULSAROS_VXLAN_REPO:-https://github.com/senivan/PulsarOS-vxlan.git}"
+    ref="${PULSAROS_VXLAN_REF:-main}"
+
+    mkdir -p "${prefix}"
+    if [ ! -d "${source_dir}/.git" ]; then
+      rm -rf "${source_dir}"
+      git clone --recurse-submodules "${repo}" "${source_dir}"
+    fi
+    git -C "${source_dir}" fetch origin "${ref}"
+    git -C "${source_dir}" checkout --force FETCH_HEAD
+    git -C "${source_dir}" submodule update --init --recursive
+  args:
+    executable: /bin/bash
+  environment:
+    PULSAROS_VXLAN_REPO: "{{ lookup('ansible.builtin.env', 'PULSAROS_VXLAN_REPO') | default('https://github.com/senivan/PulsarOS-vxlan.git', true) }}"
+    PULSAROS_VXLAN_REF: "{{ lookup('ansible.builtin.env', 'PULSAROS_VXLAN_REF') | default('main', true) }}"
+  changed_when: true
+
+- name: Build and install PulsarOS VXLAN dataplane
+  ansible.builtin.shell: |
+    set -euo pipefail
+    source_dir=/opt/pulsaros/vxlan/source/dataplane
+    build_dir="${source_dir}/build"
+
+    cmake -S "${source_dir}" -B "${build_dir}" -DCMAKE_BUILD_TYPE=RelWithDebInfo
+    cmake --build "${build_dir}" --target vxlan-dp
+    install -D -m 0755 "${build_dir}/vxlan-dp" /usr/local/libexec/pulsaros/vxlan/vxlan-dp
+    ln -sfn /usr/local/libexec/pulsaros/vxlan/vxlan-dp /usr/local/bin/pulsaros-vxlan-dp
+  args:
+    executable: /bin/bash
+  changed_when: true
+
+- name: Copy resolved topology to guest
+  ansible.builtin.copy:
+    content: "{{ lookup('ansible.builtin.file', playbook_dir + '/../artifacts/topology.json') }}"
+    dest: /tmp/pulsaros-testbed-topology.json
+    mode: "0644"
+
+- name: Render PulsarOS VXLAN per-host config
+  ansible.builtin.shell: |
+    set -euo pipefail
+    python3 - <<'PY'
+    import json
+    import os
+    import subprocess
+    from pathlib import Path
+
+    host_name = os.environ["TOPOLOGY_HOST"]
+    topology = json.loads(Path("/tmp/pulsaros-testbed-topology.json").read_text())
+    segments = topology.get("segments", {})
+
+    def run(*args, check=True):
+        subprocess.run(args, check=check)
+
+    def sh(command, check=True):
+        subprocess.run(["/bin/bash", "-lc", command], check=check)
+
+    def iface_by_mac(mac):
+        wanted = mac.lower()
+        for path in Path("/sys/class/net").iterdir():
+            if "." in path.name:
+                continue
+            try:
+                if (path / "address").read_text().strip().lower() == wanted:
+                    return path.name
+            except FileNotFoundError:
+                continue
+        raise SystemExit(f"interface with MAC {mac} not found on {host_name}")
+
+    def disable_nm(dev):
+        sh(f"command -v nmcli >/dev/null 2>&1 && nmcli device set {dev!r} managed no || true")
+
+    def set_up(dev):
+        disable_nm(dev)
+        run("ip", "link", "set", dev, "up")
+
+    ports = []
+    vxlan_segments = []
+    port_names = set()
+
+    def add_port(port):
+        name = port["name"]
+        if name in port_names:
+            return
+        port_names.add(name)
+        ports.append(port)
+
+    for segment_name, segment in segments.items():
+        local = None
+        peers = []
+        for vtep in segment.get("vteps", []):
+            if vtep["host"] == host_name:
+                local = vtep
+            else:
+                peers.append(vtep)
+        if not local:
+            continue
+
+        underlay_if = iface_by_mac(local["underlay_mac"])
+        set_up(underlay_if)
+        underlay_port = f"underlay-{local['underlay_nic']}"
+        add_port(
+            {
+                "name": underlay_port,
+                "role": "underlay",
+                "pmd": "af_packet",
+                "iface": underlay_if,
+                "ip": local["underlay_ip"],
+            }
+        )
+
+        access_ports = []
+        for nic in local.get("local_nics", []):
+            dev = iface_by_mac(nic["mac"])
+            set_up(dev)
+            access_port = f"access-{nic['name']}"
+            add_port(
+                {
+                    "name": access_port,
+                    "role": "access",
+                    "pmd": "af_packet",
+                    "iface": dev,
+                }
+            )
+            access_ports.append(access_port)
+
+        if not access_ports:
+            continue
+        vxlan_segments.append(
+            {
+                "name": segment_name,
+                "vni": segment["vni"],
+                "underlay_port": underlay_port,
+                "access_ports": access_ports,
+                "peers": [{"ip": peer["underlay_address"]} for peer in peers],
+            }
+        )
+
+    config = {
+        "schema_version": 1,
+        "dataplane": {
+            "lcores": os.environ.get("PULSAROS_VXLAN_LCORES", "0-1"),
+            "mbufs": int(os.environ.get("PULSAROS_VXLAN_MBUFS", "8192")),
+            "mbuf_cache": int(os.environ.get("PULSAROS_VXLAN_MBUF_CACHE", "256")),
+            "rx_desc": int(os.environ.get("PULSAROS_VXLAN_RX_DESC", "1024")),
+            "tx_desc": int(os.environ.get("PULSAROS_VXLAN_TX_DESC", "1024")),
+        },
+        "ports": ports,
+        "vxlan": {
+            "udp_port": 4789,
+            "controlplane": "static",
+            "segments": vxlan_segments,
+        },
+    }
+
+    if not ports or not vxlan_segments:
+        raise SystemExit(f"no PulsarOS VXLAN config rendered for VTEP {host_name}")
+
+    Path("/etc/pulsaros/vxlan").mkdir(parents=True, exist_ok=True)
+    Path("/tmp/pulsaros-testbed").mkdir(parents=True, exist_ok=True)
+    rendered = json.dumps(config, indent=2, sort_keys=True) + "\n"
+    Path("/etc/pulsaros/vxlan/config.json").write_text(rendered, encoding="utf-8")
+    Path("/tmp/pulsaros-testbed/pulsaros-vxlan-config.json").write_text(
+        rendered,
+        encoding="utf-8",
+    )
+    PY
+  args:
+    executable: /bin/bash
+  environment:
+    TOPOLOGY_HOST: "{{ inventory_hostname }}"
+    PULSAROS_VXLAN_LCORES: "{{ lookup('ansible.builtin.env', 'PULSAROS_VXLAN_LCORES') | default('0-1', true) }}"
+    PULSAROS_VXLAN_MBUFS: "{{ lookup('ansible.builtin.env', 'PULSAROS_VXLAN_MBUFS') | default('8192', true) }}"
+    PULSAROS_VXLAN_MBUF_CACHE: "{{ lookup('ansible.builtin.env', 'PULSAROS_VXLAN_MBUF_CACHE') | default('256', true) }}"
+    PULSAROS_VXLAN_RX_DESC: "{{ lookup('ansible.builtin.env', 'PULSAROS_VXLAN_RX_DESC') | default('1024', true) }}"
+    PULSAROS_VXLAN_TX_DESC: "{{ lookup('ansible.builtin.env', 'PULSAROS_VXLAN_TX_DESC') | default('1024', true) }}"
+  changed_when: true
+
+- name: Run PulsarOS VXLAN init smoke
+  ansible.builtin.shell: |
+    set -euo pipefail
+    mkdir -p /tmp/pulsaros-testbed
+    log=/tmp/pulsaros-testbed/pulsaros-vxlan-init.log
+    timeout 20 pulsaros-vxlan-dp /etc/pulsaros/vxlan/config.json > "${log}" 2>&1
+    cat "${log}"
+    grep -q 'initialized .* DPDK ports' "${log}"
+  args:
+    executable: /bin/bash
+  changed_when: true

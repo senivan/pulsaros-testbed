@@ -97,6 +97,14 @@ on:
       kernel_rpm_url:
         description: "Optional direct kernel RPM URL when kernel_source=rpm-url"
         required: false
+      pulsaros_vxlan_repo:
+        description: "PulsarOS VXLAN git repository"
+        required: true
+        default: "https://github.com/senivan/PulsarOS-vxlan.git"
+      pulsaros_vxlan_ref:
+        description: "PulsarOS VXLAN git ref"
+        required: true
+        default: "main"
       keep_vms_on_failure:
         description: "Leave generated VMs running when the testbed job fails"
         required: true
@@ -235,6 +243,8 @@ jobs:
       KERNEL_SOURCE: ${{ inputs.kernel_source }}
       KERNEL_RPM_URL: ${{ inputs.kernel_rpm_url }}
       KERNEL_EXPECTED_RELEASE: ${{ inputs.kernel_source != 'none' && 'pulsaros' || '' }}
+      PULSAROS_VXLAN_REPO: ${{ inputs.pulsaros_vxlan_repo }}
+      PULSAROS_VXLAN_REF: ${{ inputs.pulsaros_vxlan_ref }}
 
     steps:
       - name: Checkout repository
