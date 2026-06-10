@@ -127,6 +127,7 @@ def test_multi_vtep_topology_renders_segments(monkeypatch):
     assert data["control_plane"]["hosts"]["vtep-a"]["peers"][0]["route_reflector_client"] is True
     assert data["plays"][0]["name"] == "Disable shell OSC context output"
     assert data["plays"][0]["gather_facts"] is False
+    assert "pulsaros-vxlan" in data["plays"][2]["roles"]
     assert data["checks"][0]["type"] == "evpn_control_plane"
     assert data["checks"][1]["type"] == "segment_ping_matrix"
     assert data["checks"][-1]["type"] == "segment_perf_probe"
@@ -150,6 +151,7 @@ def test_four_vtep_fullmesh_topology_renders_evpn_peers(monkeypatch):
         assert host not in {peer["host"] for peer in metadata["peers"]}
         assert metadata["vnis"] == [10400]
     assert data["checks"][0]["type"] == "evpn_control_plane"
+    assert "pulsaros-vxlan" in data["plays"][2]["roles"]
     assert data["faults"][0]["type"] == "bgp_peer_shutdown"
 
 
@@ -175,6 +177,7 @@ def test_four_vtep_dual_rr_topology_renders_rr_clients(monkeypatch):
     assert {peer["host"] for peer in rr_client_peers} == {"vtep-c", "vtep-d"}
     assert control_plane["hosts"]["vtep-c"]["vnis"] == [10500]
     assert data["checks"][0]["type"] == "evpn_control_plane"
+    assert "pulsaros-vxlan" in data["plays"][2]["roles"]
     assert data["faults"][0]["type"] == "frr_restart"
     assert data["faults"][0]["expected_impact"] == "no_outage"
 
