@@ -224,6 +224,7 @@ plays:
     roles:
       - hugepages
       - dpdk
+      - pulsaros-vxlan
   - name: Configure 4-VTEP VXLAN EVPN route reflector topology
     hosts: all
     become: true

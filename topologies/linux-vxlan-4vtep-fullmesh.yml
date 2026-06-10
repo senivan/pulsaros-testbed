@@ -221,6 +221,7 @@ plays:
     roles:
       - hugepages
       - dpdk
+      - pulsaros-vxlan
   - name: Configure 4-VTEP VXLAN EVPN full mesh
     hosts: all
     become: true

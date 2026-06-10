@@ -375,6 +375,7 @@ plays:
     roles:
       - hugepages
       - dpdk
+      - pulsaros-vxlan
   - name: Configure multi-VTEP VXLAN EVPN topology
     hosts: all
     become: true

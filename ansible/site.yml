@@ -28,6 +28,7 @@
   roles:
     - hugepages
     - dpdk
+    - pulsaros-vxlan
 
 - name: Provision client traffic generator prerequisites
   hosts: clients
