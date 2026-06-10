@@ -24,7 +24,7 @@ on:
       storage:
         description: "Proxmox storage target for full clones"
         required: true
-        default: "local-lvm"
+        default: "DATA"
       pve_full_clone:
         description: "Use full clones instead of linked clones"
         required: true
@@ -48,7 +48,7 @@ on:
       mgmt_bridge:
         description: "Management bridge"
         required: true
-        default: "vmbr0"
+        default: "infra_brdg"
       network_mode:
         description: "Dataplane isolation mode"
         required: true
@@ -76,7 +76,7 @@ on:
       kernel_source:
         description: "Custom kernel source"
         required: true
-        default: "none"
+        default: "pulsaros-kernel-git"
         type: choice
         options:
           - none
@@ -93,7 +93,7 @@ on:
       kernel_version:
         description: "Upstream Linux kernel version to build"
         required: true
-        default: "6.16"
+        default: "7.0.9"
       kernel_rpm_url:
         description: "Optional direct kernel RPM URL when kernel_source=rpm-url"
         required: false
@@ -113,6 +113,7 @@ on:
 
 concurrency:
   group: proxmox-pulsaros-testbed
+  queue: max
   cancel-in-progress: false
 
 jobs:
