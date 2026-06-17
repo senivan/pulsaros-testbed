@@ -1,7 +1,7 @@
 import os
 import re
 
-from conftest import all_hosts, ssh
+from conftest import all_hosts, group_hosts, ssh
 
 
 def test_all_vms_respond_to_ssh(topology, ssh_user, ssh_key):
@@ -63,11 +63,20 @@ def test_custom_kernel_dpdk_profile_when_requested(topology, ssh_user, ssh_key):
     }
     assert profile in expected_args
 
+    vteps = set(group_hosts(topology, "vteps"))
+    assert vteps, "topology has no VTEP hosts to validate DPDK kernel profile"
+    profile_args = expected_args[profile]
+    managed_args = set().union(*expected_args.values())
+
     for host in all_hosts(topology):
         result = ssh(topology, ssh_user, ssh_key, host, "cat /proc/cmdline")
         cmdline_args = set(result.stdout.strip().split())
-        missing = expected_args[profile] - cmdline_args
-        assert not missing, f"{host} missing {profile} kernel args: {sorted(missing)}"
+        if host in vteps:
+            missing = profile_args - cmdline_args
+            assert not missing, f"{host} missing {profile} kernel args: {sorted(missing)}"
+        else:
+            unexpected = managed_args & cmdline_args
+            assert not unexpected, f"{host} unexpectedly has DPDK kernel args: {sorted(unexpected)}"
 
 
 def test_dmesg_has_no_panic_or_oops(topology, ssh_user, ssh_key):

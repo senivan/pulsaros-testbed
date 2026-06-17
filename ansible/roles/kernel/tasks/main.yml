@@ -12,7 +12,11 @@
   ansible.builtin.set_fact:
     kernel_source: "{{ lookup('ansible.builtin.env', 'KERNEL_SOURCE') | default('none', true) }}"
     kernel_expected_release: "{{ lookup('ansible.builtin.env', 'KERNEL_EXPECTED_RELEASE') | default('', true) }}"
-    kernel_dpdk_profile: "{{ lookup('ansible.builtin.env', 'KERNEL_DPDK_PROFILE') | default('dpdk-vm', true) }}"
+    kernel_dpdk_profile_requested: "{{ lookup('ansible.builtin.env', 'KERNEL_DPDK_PROFILE') | default('dpdk-vm', true) }}"
+
+- name: Select host kernel DPDK profile
+  ansible.builtin.set_fact:
+    kernel_dpdk_profile: "{{ kernel_dpdk_profile_requested if 'vteps' in group_names else 'none' }}"
 
 - name: Report template kernel path
   ansible.builtin.debug:
@@ -80,8 +84,8 @@
 - name: Validate requested kernel DPDK profile
   ansible.builtin.assert:
     that:
-      - kernel_dpdk_profile in ['dpdk-vm', 'dpdk-small', 'dpdk-bench', 'none']
-    fail_msg: "KERNEL_DPDK_PROFILE must be one of dpdk-vm, dpdk-small, dpdk-bench, none; got '{{ kernel_dpdk_profile }}'."
+      - kernel_dpdk_profile_requested in ['dpdk-vm', 'dpdk-small', 'dpdk-bench', 'none']
+    fail_msg: "KERNEL_DPDK_PROFILE must be one of dpdk-vm, dpdk-small, dpdk-bench, none; got '{{ kernel_dpdk_profile_requested }}'."
   when: kernel_source != 'none'
 
 - name: Select latest PulsarOS kernel as default

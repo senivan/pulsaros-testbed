@@ -144,9 +144,14 @@ clone_vm() {
 
 configure_vm_profile_shape() {
   local host="$1" vmid="$2"
+  local is_vtep
 
   case "$KERNEL_DPDK_PROFILE" in
     dpdk-vm)
+      is_vtep=$(jq -r --arg host "$host" '.hosts[$host].groups // [] | index("vteps") != null' artifacts/topology.json)
+      if [[ "$is_vtep" != "true" ]]; then
+        return 0
+      fi
       log "Sizing $host ($vmid) for dpdk-vm profile: 4 cores, 6144 MB RAM, balloon disabled"
       run_pve qm set "$vmid" --cores 4 --memory 6144 --balloon 0
       ;;
