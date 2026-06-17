@@ -44,6 +44,12 @@ case "$NETWORK_MODE" in
 esac
 export NETWORK_MODE
 
+KERNEL_DPDK_PROFILE="${KERNEL_DPDK_PROFILE:-none}"
+case "$KERNEL_DPDK_PROFILE" in
+  dpdk-vm|dpdk-small|dpdk-bench|none) ;;
+  *) die "KERNEL_DPDK_PROFILE must be one of dpdk-vm, dpdk-small, dpdk-bench, none; got: $KERNEL_DPDK_PROFILE" ;;
+esac
+
 if [[ "$NETWORK_MODE" == "bridge" ]]; then
   need_env TEST_BRIDGE
 else
@@ -136,6 +142,19 @@ clone_vm() {
   ./scripts/run-state.py vm "$host" cloned
 }
 
+configure_vm_profile_shape() {
+  local host="$1" vmid="$2"
+
+  case "$KERNEL_DPDK_PROFILE" in
+    dpdk-vm)
+      log "Sizing $host ($vmid) for dpdk-vm profile: 4 cores, 6144 MB RAM, balloon disabled"
+      run_pve qm set "$vmid" --cores 4 --memory 6144 --balloon 0
+      ;;
+    *)
+      ;;
+  esac
+}
+
 while IFS=$'\t' read -r host vmid vm_name; do
   clone_vm "$host" "$vmid" "$vm_name"
 done < <(jq -r '.hosts[] | [.name, .vmid, .vm_name] | @tsv' artifacts/topology.json)
@@ -147,6 +166,7 @@ fi
 log "Attaching management and dataplane NICs"
 while IFS=$'\t' read -r host vmid; do
   log "Configuring NICs for $host ($vmid)"
+  configure_vm_profile_shape "$host" "$vmid"
   run_pve qm set "$vmid" --serial0 socket
   while IFS=$'\t' read -r idx mac bridge; do
     run_pve qm set "$vmid" "--net${idx}" "virtio=$mac,bridge=$bridge,firewall=0"
