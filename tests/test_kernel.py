@@ -24,6 +24,52 @@ def test_custom_kernel_marker_when_requested(topology, ssh_user, ssh_key):
         assert expected in result.stdout.strip()
 
 
+def test_custom_kernel_dpdk_profile_when_requested(topology, ssh_user, ssh_key):
+    expected = os.environ.get("KERNEL_EXPECTED_RELEASE", "")
+    profile = os.environ.get("KERNEL_DPDK_PROFILE", "none")
+    if not expected or profile == "none":
+        return
+
+    expected_args = {
+        "dpdk-vm": {
+            "isolcpus=1-3",
+            "nohz_full=1-3",
+            "rcu_nocbs=1-3",
+            "irqaffinity=0",
+            "default_hugepagesz=2M",
+            "hugepagesz=2M",
+            "hugepages=2048",
+        },
+        "dpdk-small": {
+            "isolcpus=2-3",
+            "nohz_full=2-3",
+            "rcu_nocbs=2-3",
+            "irqaffinity=0-1",
+            "default_hugepagesz=1G",
+            "hugepagesz=1G",
+            "hugepages=2",
+        },
+        "dpdk-bench": {
+            "isolcpus=2-9",
+            "nohz_full=2-9",
+            "rcu_nocbs=2-9",
+            "irqaffinity=0-1",
+            "default_hugepagesz=1G",
+            "hugepagesz=1G",
+            "hugepages=8",
+            "audit=0",
+            "processor.max_cstate=1",
+        },
+    }
+    assert profile in expected_args
+
+    for host in all_hosts(topology):
+        result = ssh(topology, ssh_user, ssh_key, host, "cat /proc/cmdline")
+        cmdline_args = set(result.stdout.strip().split())
+        missing = expected_args[profile] - cmdline_args
+        assert not missing, f"{host} missing {profile} kernel args: {sorted(missing)}"
+
+
 def test_dmesg_has_no_panic_or_oops(topology, ssh_user, ssh_key):
     forbidden = {
         "kernel panic": re.compile(r"\bkernel panic\b", re.IGNORECASE),

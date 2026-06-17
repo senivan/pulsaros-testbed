@@ -97,6 +97,16 @@ on:
       kernel_rpm_url:
         description: "Optional direct kernel RPM URL when kernel_source=rpm-url"
         required: false
+      kernel_dpdk_profile:
+        description: "PulsarOS kernel DPDK runtime profile"
+        required: true
+        default: "dpdk-vm"
+        type: choice
+        options:
+          - dpdk-vm
+          - dpdk-small
+          - dpdk-bench
+          - none
       pulsaros_vxlan_repo:
         description: "PulsarOS VXLAN git repository"
         required: true
@@ -126,6 +136,7 @@ jobs:
       KERNEL_REPO: ${{ inputs.kernel_repo }}
       KERNEL_REF: ${{ inputs.kernel_ref }}
       KVER: ${{ inputs.kernel_version }}
+      KERNEL_DPDK_PROFILE: ${{ inputs.kernel_dpdk_profile }}
       INSTALL_RPMS: "0"
       CCACHE_DIR: ${{ github.workspace }}/.ccache
       CCACHE_BASEDIR: ${{ github.workspace }}
@@ -244,6 +255,7 @@ jobs:
       KERNEL_SOURCE: ${{ inputs.kernel_source }}
       KERNEL_RPM_URL: ${{ inputs.kernel_rpm_url }}
       KERNEL_EXPECTED_RELEASE: ${{ inputs.kernel_source != 'none' && 'pulsaros' || '' }}
+      KERNEL_DPDK_PROFILE: ${{ inputs.kernel_dpdk_profile }}
       PULSAROS_VXLAN_REPO: ${{ inputs.pulsaros_vxlan_repo }}
       PULSAROS_VXLAN_REF: ${{ inputs.pulsaros_vxlan_ref }}
 
