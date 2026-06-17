@@ -12,6 +12,7 @@
   ansible.builtin.set_fact:
     kernel_source: "{{ lookup('ansible.builtin.env', 'KERNEL_SOURCE') | default('none', true) }}"
     kernel_expected_release: "{{ lookup('ansible.builtin.env', 'KERNEL_EXPECTED_RELEASE') | default('', true) }}"
+    kernel_dpdk_profile: "{{ lookup('ansible.builtin.env', 'KERNEL_DPDK_PROFILE') | default('dpdk-vm', true) }}"
 
 - name: Report template kernel path
   ansible.builtin.debug:
@@ -76,6 +77,13 @@
     executable: /bin/bash
   when: kernel_source != 'none'
 
+- name: Validate requested kernel DPDK profile
+  ansible.builtin.assert:
+    that:
+      - kernel_dpdk_profile in ['dpdk-vm', 'dpdk-small', 'dpdk-bench', 'none']
+    fail_msg: "KERNEL_DPDK_PROFILE must be one of dpdk-vm, dpdk-small, dpdk-bench, none; got '{{ kernel_dpdk_profile }}'."
+  when: kernel_source != 'none'
+
 - name: Select latest PulsarOS kernel as default
   ansible.builtin.shell:
     cmd: |
@@ -89,14 +97,38 @@
       initrd="/boot/initramfs-${latest}.img"
       working_args="${KERNEL_WORKING_ARGS}"
       root_fstype="${KERNEL_ROOT_FSTYPE}"
-      extra_args="hugepagesz=2M default_hugepagesz=2M rootwait console=tty0 console=ttyS0,115200n8 earlyprintk=serial,ttyS0,115200 ignore_loglevel loglevel=7"
+      profile="${KERNEL_DPDK_PROFILE}"
+      profile_args=""
+      working_args="$(printf '%s\n' $working_args \
+        | awk '!/^(isolcpus|nohz_full|rcu_nocbs|irqaffinity|default_hugepagesz|hugepagesz|hugepages|intel_iommu|amd_iommu|iommu|audit|processor\.max_cstate)=/' \
+        | paste -sd ' ' -)"
+      if [ "$profile" != "none" ]; then
+        profile_path="/usr/share/pulsaros-kernel/profiles/${profile}.env"
+        render_cmd="/usr/libexec/pulsaros-kernel/render-cmdline.sh"
+        if [ ! -r "$profile_path" ]; then
+          echo "Requested kernel DPDK profile is missing: $profile_path" >&2
+          exit 1
+        fi
+        if [ ! -x "$render_cmd" ]; then
+          echo "Kernel DPDK profile renderer is missing or not executable: $render_cmd" >&2
+          exit 1
+        fi
+        profile_args="$("$render_cmd" "$profile_path")"
+        install -d -m 0755 /etc/pulsaros-kernel
+        install -m 0644 "$profile_path" /etc/pulsaros-kernel/dpdk-profile.env
+        if systemctl list-unit-files --no-legend pulsaros-dpdk-host.service 2>/dev/null \
+          | grep -q '^pulsaros-dpdk-host\.service'; then
+          systemctl enable pulsaros-dpdk-host.service
+        fi
+      fi
+      extra_args="rootwait console=tty0 console=ttyS0,115200n8 earlyprintk=serial,ttyS0,115200 ignore_loglevel loglevel=7"
       # The kernel RPM may add rootfstype=ext4 unconditionally. Reuse the
       # template kernel's known-good root args so Fedora btrfs/xfs templates boot.
       grubby --remove-kernel "$kernel" || true
       grubby --add-kernel "$kernel" \
         --initrd "$initrd" \
         --title "PulsarOS Kernel ${latest}" \
-        --args "$working_args $extra_args"
+        --args "$working_args $extra_args $profile_args"
       grubby --set-default "$kernel"
       grubby --info "$kernel" > /tmp/pulsaros-custom-kernel-grubby-info
       cat /tmp/pulsaros-custom-kernel-grubby-info
@@ -109,7 +141,7 @@
       # Fedora grubby may split root= into a synthetic root="..." field in
       # grubby --info. Patch the BLS options line directly so the booted kernel
       # receives the same known-good root args as the template kernel.
-      bls_options="$working_args $extra_args"
+      bls_options="$working_args $extra_args $profile_args"
       tmp="$(mktemp)"
       awk -v options="$bls_options" '
         BEGIN { wrote = 0 }
@@ -140,12 +172,18 @@
         exit 1
       fi
       echo "Selected $latest with root filesystem ${root_fstype}"
+      if [ "$profile" != "none" ]; then
+        echo "Applied PulsarOS kernel DPDK profile ${profile}: ${profile_args}"
+      else
+        echo "PulsarOS kernel DPDK profile disabled."
+      fi
       echo "$latest" > /tmp/pulsaros-expected-kernel-release
   args:
     executable: /bin/bash
   environment:
     KERNEL_WORKING_ARGS: "{{ kernel_working_args.stdout }}"
     KERNEL_ROOT_FSTYPE: "{{ kernel_root_fstype.stdout }}"
+    KERNEL_DPDK_PROFILE: "{{ kernel_dpdk_profile }}"
   when: kernel_source != 'none'
 
 - name: Validate custom kernel boot support before reboot

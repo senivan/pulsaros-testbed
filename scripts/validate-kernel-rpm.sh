@@ -7,6 +7,12 @@ die() { printf '[kernel-rpm-validate] ERROR: %s\n' "$*" >&2; exit 1; }
 RPM_DIR="${1:-artifacts/kernel-rpms}"
 ROOT_FSTYPE="${KERNEL_ROOT_FSTYPE:-xfs}"
 REQUIRE_LVM_INITRAMFS="${KERNEL_REQUIRE_LVM_INITRAMFS:-1}"
+KERNEL_DPDK_PROFILE="${KERNEL_DPDK_PROFILE:-none}"
+
+case "$KERNEL_DPDK_PROFILE" in
+  dpdk-vm|dpdk-small|dpdk-bench|none) ;;
+  *) die "KERNEL_DPDK_PROFILE must be one of dpdk-vm, dpdk-small, dpdk-bench, none; got $KERNEL_DPDK_PROFILE" ;;
+esac
 
 if command -v rpm2cpio >/dev/null 2>&1; then
   EXTRACTOR="rpm2cpio"
@@ -70,6 +76,31 @@ initramfs_contains() {
     die "lsinitrd or bsdtar is required to inspect initramfs contents"
   fi
   grep -Eq "$pattern" <<<"$contents"
+}
+
+require_packaged_file() {
+  local tmpdir="$1"
+  local path="$2"
+  [[ -f "$tmpdir/$path" ]] || die "Missing packaged file /$path"
+}
+
+require_packaged_executable() {
+  local tmpdir="$1"
+  local path="$2"
+  [[ -x "$tmpdir/$path" ]] || die "Missing packaged executable /$path"
+}
+
+validate_dpdk_runtime_surface() {
+  local tmpdir="$1"
+  local profile="$2"
+
+  [[ "$profile" == "none" ]] && return 0
+
+  require_packaged_file "$tmpdir" "usr/share/pulsaros-kernel/profiles/${profile}.env"
+  require_packaged_executable "$tmpdir" "usr/libexec/pulsaros-kernel/render-cmdline.sh"
+  require_packaged_executable "$tmpdir" "usr/libexec/pulsaros-kernel/set-irqs.sh"
+  require_packaged_executable "$tmpdir" "usr/libexec/pulsaros-kernel/set-performance-governor.sh"
+  require_packaged_file "$tmpdir" "usr/lib/systemd/system/pulsaros-dpdk-host.service"
 }
 
 validate_rpm() {
@@ -138,6 +169,8 @@ validate_rpm() {
     initramfs_contains "$initramfs" '(^|/)(lvm|lvm_scan|dmsetup)( |$)' || \
       die "LVM initramfs support is required for the Fedora Proxmox template but is missing from /boot/initramfs-${release}.img"
   fi
+
+  validate_dpdk_runtime_surface "$tmpdir" "$KERNEL_DPDK_PROFILE"
 
   log "PASS: $(basename "$rpm") supports Proxmox virtio-scsi boot with $ROOT_FSTYPE root"
   rm -rf "$tmpdir"
