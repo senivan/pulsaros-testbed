@@ -147,7 +147,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install kernel build dependencies
         run: |
@@ -158,7 +158,7 @@ jobs:
 
       - name: Restore ccache
         id: ccache-restore
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: .ccache
           key: pulsaros-kernel-ccache-${{ runner.os }}-${{ inputs.kernel_version }}-${{ inputs.kernel_ref }}-${{ github.run_id }}
@@ -176,7 +176,7 @@ jobs:
           ccache -s
 
       - name: Restore kernel tarball cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: kernel-src
           key: pulsaros-kernel-src-${{ inputs.kernel_version }}
@@ -217,7 +217,7 @@ jobs:
         run: ./scripts/validate-kernel-rpm.sh artifacts/kernel-rpms
 
       - name: Upload kernel RPM artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: pulsaros-kernel-rpms-${{ github.run_id }}
           path: artifacts/kernel-rpms/
@@ -225,7 +225,7 @@ jobs:
 
       - name: Save ccache
         if: always()
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v5
         with:
           path: .ccache
           key: ${{ steps.ccache-restore.outputs.cache-primary-key }}
@@ -261,7 +261,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Validate kernel inputs
         if: ${{ inputs.kernel_source == 'rpm-url' && inputs.kernel_rpm_url == '' }}
@@ -271,7 +271,7 @@ jobs:
 
       - name: Download built kernel RPMs
         if: ${{ inputs.kernel_source == 'pulsaros-kernel-git' }}
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: pulsaros-kernel-rpms-${{ github.run_id }}
           path: artifacts/kernel-rpms
@@ -315,7 +315,7 @@ jobs:
 
       - name: Upload artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: pulsaros-proxmox-testbed-${{ github.run_id }}
           path: |
@@ -338,11 +338,11 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Download testbed artifacts
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: pulsaros-proxmox-testbed-${{ github.run_id }}
           path: .
@@ -353,7 +353,7 @@ jobs:
 
       - name: Upload AI analysis
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: pulsaros-proxmox-testbed-ai-analysis-${{ github.run_id }}
           path: |
