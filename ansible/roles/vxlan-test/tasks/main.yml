@@ -37,6 +37,9 @@
     topology = json.loads(Path("/tmp/pulsaros-testbed-topology.json").read_text())
     segments = topology.get("segments", {})
     control_plane = topology.get("control_plane", {"type": "static"})
+    dataplane_mode = os.environ.get("VXLAN_DATAPLAN_MODE", "linux")
+    if dataplane_mode not in {"linux", "dpdk"}:
+        raise SystemExit(f"unsupported VXLAN dataplane mode: {dataplane_mode}")
 
     def run(*args, check=True):
         subprocess.run(args, check=check)
@@ -118,6 +121,22 @@
             vxlan = segment["vxlan"]
 
             disable_nm(underlay_if)
+            if dataplane_mode == "dpdk":
+                delete_link(vxlan)
+                delete_link(bridge)
+                sh(f"ip link set {underlay_if!r} nomaster 2>/dev/null || true")
+                run("ip", "addr", "flush", "dev", underlay_if)
+                run("ip", "link", "set", underlay_if, "promisc", "on")
+                set_up(underlay_if)
+                for nic in local.get("local_nics", []):
+                    dev = iface_by_mac(nic["mac"])
+                    disable_nm(dev)
+                    sh(f"ip link set {dev!r} nomaster 2>/dev/null || true")
+                    run("ip", "addr", "flush", "dev", dev)
+                    run("ip", "link", "set", dev, "promisc", "on")
+                    set_up(dev)
+                continue
+
             run("ip", "addr", "replace", local["underlay_ip"], "dev", underlay_if)
             set_up(underlay_if)
 
@@ -179,4 +198,5 @@
     executable: /bin/bash
   environment:
     TOPOLOGY_HOST: "{{ inventory_hostname }}"
+    VXLAN_DATAPLAN_MODE: "{{ vxlan_dataplane_mode | default('linux') }}"
   changed_when: true

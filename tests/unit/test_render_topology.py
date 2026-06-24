@@ -12,6 +12,7 @@ TOPOLOGY = ROOT / "topologies" / "linux-vxlan-reference.yml"
 MULTI_VTEP_TOPOLOGY = ROOT / "topologies" / "linux-vxlan-3vtep-3lan.yml"
 FOUR_VTEP_FULLMESH_TOPOLOGY = ROOT / "topologies" / "linux-vxlan-4vtep-fullmesh.yml"
 FOUR_VTEP_DUAL_RR_TOPOLOGY = ROOT / "topologies" / "linux-vxlan-4vtep-dual-rr.yml"
+DPDK_VXLAN_TOPOLOGY = ROOT / "topologies" / "dpdk-vxlan-reference.yml"
 
 
 spec = importlib.util.spec_from_file_location("render_topology", MODULE_PATH)
@@ -91,6 +92,23 @@ def test_default_topology_resolves_ansible_vars(monkeypatch):
 
     assert dataplane_mac == data["hosts"]["client-a"]["nics"][1]["mac"]
     assert peer_mac == data["hosts"]["client-b"]["nics"][1]["mac"]
+
+
+def test_dpdk_vxlan_topology_renders_static_service(monkeypatch):
+    base_env(monkeypatch)
+
+    data = render_topology.render(DPDK_VXLAN_TOPOLOGY)
+
+    assert data["name"] == "dpdk-vxlan-reference"
+    assert data["control_plane"] == {"type": "static"}
+    assert data["segments"]["default-lan"]["vni"] == 100
+    assert data["checks"][0]["type"] == "segment_ping_matrix"
+    assert data["checks"][1]["type"] == "segment_bidirectional_capture"
+    prepare_play = data["plays"][3]
+    assert prepare_play["vars"]["vxlan_dataplane_mode"] == "dpdk"
+    service_play = data["plays"][4]
+    assert service_play["vars"]["pulsaros_vxlan_runtime"] == "service"
+    assert "frr-evpn" not in service_play["roles"]
 
 
 def test_bridge_mode_uses_legacy_vlan_tags(monkeypatch):

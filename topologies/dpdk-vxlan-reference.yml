@@ -1,0 +1,185 @@
+schema_version: 1
+name: dpdk-vxlan-reference
+description: Two-VTEP static VXLAN topology carried by the PulsarOS DPDK dataplane.
+
+networks:
+  left-l2:
+    mode: access
+    vnet_prefix: dl
+    inner_vlan: 111
+    legacy_vlan_offset: 11
+  underlay:
+    mode: access
+    vnet_prefix: du
+    inner_vlan: 112
+    legacy_vlan_offset: 12
+  right-l2:
+    mode: access
+    vnet_prefix: dr
+    inner_vlan: 113
+    legacy_vlan_offset: 13
+
+hosts:
+  client-a:
+    vmid_offset: 1
+    groups:
+      - clients
+    nics:
+      - name: mgmt
+        network: management
+        mac_offset: 1
+        management: true
+      - name: left
+        network: left-l2
+        mac_offset: 11
+
+  vtep-a:
+    vmid_offset: 2
+    groups:
+      - vteps
+    nics:
+      - name: mgmt
+        network: management
+        mac_offset: 2
+        management: true
+      - name: left
+        network: left-l2
+        mac_offset: 12
+      - name: underlay
+        network: underlay
+        mac_offset: 22
+
+  vtep-b:
+    vmid_offset: 3
+    groups:
+      - vteps
+    nics:
+      - name: mgmt
+        network: management
+        mac_offset: 3
+        management: true
+      - name: underlay
+        network: underlay
+        mac_offset: 23
+      - name: right
+        network: right-l2
+        mac_offset: 33
+
+  client-b:
+    vmid_offset: 4
+    groups:
+      - clients
+    nics:
+      - name: mgmt
+        network: management
+        mac_offset: 4
+        management: true
+      - name: right
+        network: right-l2
+        mac_offset: 14
+
+segments:
+  default-lan:
+    vni: 100
+    vteps:
+      - host: vtep-a
+        underlay_nic: underlay
+        underlay_ip: 172.16.100.1/30
+        local_nics:
+          - left
+      - host: vtep-b
+        underlay_nic: underlay
+        underlay_ip: 172.16.100.2/30
+        local_nics:
+          - right
+    members:
+      - host: client-a
+        nic: left
+        mode: access
+        ip: 10.10.0.1/24
+      - host: client-b
+        nic: right
+        mode: access
+        ip: 10.10.0.2/24
+
+control_plane:
+  type: static
+
+plays:
+  - name: Disable shell OSC context output
+    hosts: all
+    become: true
+    gather_facts: false
+    tasks:
+      - name: Disable systemd OSC context shell profile
+        ansible.builtin.raw: |
+          for path in \
+            /etc/profile.d/80-systemd-osc-context.sh \
+            /usr/lib/systemd/profile.d/80-systemd-osc-context.sh; do
+            if [ -e "$path" ]; then
+              mv "$path" "$path.pulsaros-disabled"
+            fi
+          done
+        changed_when: false
+  - name: Provision all testbed VMs
+    hosts: all
+    become: true
+    roles:
+      - common
+      - kernel
+  - name: Provision VTEP DPDK prerequisites
+    hosts: vteps
+    become: true
+    roles:
+      - hugepages
+      - dpdk
+  - name: Prepare clients and raw DPDK VTEP interfaces
+    hosts: all
+    become: true
+    vars:
+      vxlan_dataplane_mode: dpdk
+    roles:
+      - vxlan-test
+  - name: Deploy static PulsarOS DPDK VXLAN dataplane
+    hosts: vteps
+    become: true
+    vars:
+      pulsaros_vxlan_runtime: service
+    roles:
+      - pulsaros-vxlan
+
+checks:
+  - name: default-lan-ping-matrix
+    type: segment_ping_matrix
+    segment: default-lan
+    count: 5
+    wait: 2
+    timeout: 60
+
+  - name: default-lan-vxlan-underlay-capture
+    type: segment_bidirectional_capture
+    segment: default-lan
+    count: 5
+    wait: 2
+    timeout: 60
+    captures:
+      - host: vtep-a
+        nic: underlay
+        filter: udp port 4789
+      - host: vtep-b
+        nic: underlay
+        filter: udp port 4789
+    assertions:
+      min_packets: 4
+      contains:
+        - VXLAN
+
+compat:
+  CLIENT_A: "@host:client-a.vmid"
+  VTEP_A: "@host:vtep-a.vmid"
+  VTEP_B: "@host:vtep-b.vmid"
+  CLIENT_B: "@host:client-b.vmid"
+  CLIENT_A_IP: "@host:client-a.management_ip"
+  VTEP_A_IP: "@host:vtep-a.management_ip"
+  VTEP_B_IP: "@host:vtep-b.management_ip"
+  CLIENT_B_IP: "@host:client-b.management_ip"
