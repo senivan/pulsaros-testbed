@@ -11,6 +11,7 @@ on:
         options:
           - kernel-smoke
           - dpdk-smoke
+          - dpdk-vxlan-reference
           - topology-checks
           - full
       topology:

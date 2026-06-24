@@ -1,4 +1,10 @@
 ---
+- name: Validate PulsarOS VXLAN runtime mode
+  ansible.builtin.assert:
+    that:
+      - (pulsaros_vxlan_runtime | default('smoke')) in ['smoke', 'service']
+    fail_msg: "pulsaros_vxlan_runtime must be smoke or service"
+
 - name: Install PulsarOS VXLAN build prerequisites
   ansible.builtin.shell: |
     set -euo pipefail
@@ -35,8 +41,8 @@
   args:
     executable: /bin/bash
   environment:
-    PULSAROS_VXLAN_REPO: "{{ lookup('ansible.builtin.env', 'PULSAROS_VXLAN_REPO') | default('https://github.com/senivan/PulsarOS-vxlan.git', true) }}"
-    PULSAROS_VXLAN_REF: "{{ lookup('ansible.builtin.env', 'PULSAROS_VXLAN_REF') | default('main', true) }}"
+    PULSAROS_VXLAN_REPO: "{{ pulsaros_vxlan_repo | default(lookup('ansible.builtin.env', 'PULSAROS_VXLAN_REPO') | default('https://github.com/senivan/PulsarOS-vxlan.git', true), true) }}"
+    PULSAROS_VXLAN_REF: "{{ pulsaros_vxlan_ref | default(lookup('ansible.builtin.env', 'PULSAROS_VXLAN_REF') | default('main', true), true) }}"
   changed_when: true
 
 - name: Build and install PulsarOS VXLAN dataplane
@@ -210,3 +216,46 @@
   args:
     executable: /bin/bash
   changed_when: true
+  when: (pulsaros_vxlan_runtime | default('smoke')) == 'smoke'
+
+- name: Install PulsarOS VXLAN systemd service
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/pulsaros-vxlan.service
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=PulsarOS DPDK VXLAN dataplane
+      After=network.target
+
+      [Service]
+      Type=simple
+      ExecStart=/usr/bin/stdbuf -oL -eL /usr/local/bin/pulsaros-vxlan-dp /etc/pulsaros/vxlan/config.json
+      Restart=on-failure
+      RestartSec=2
+      LimitMEMLOCK=infinity
+
+      [Install]
+      WantedBy=multi-user.target
+  when: (pulsaros_vxlan_runtime | default('smoke')) == 'service'
+
+- name: Start PulsarOS VXLAN dataplane service
+  ansible.builtin.systemd:
+    name: pulsaros-vxlan
+    daemon_reload: true
+    enabled: true
+    state: restarted
+  when: (pulsaros_vxlan_runtime | default('smoke')) == 'service'
+
+- name: Verify PulsarOS VXLAN dataplane initialization
+  ansible.builtin.shell: |
+    set -euo pipefail
+    systemctl is-active --quiet pulsaros-vxlan
+    journalctl -b -u pulsaros-vxlan --no-pager | grep -q 'initialized .* DPDK ports; entering forwarding loop'
+  args:
+    executable: /bin/bash
+  changed_when: false
+  when: (pulsaros_vxlan_runtime | default('smoke')) == 'service'
+  retries: 10
+  delay: 1
+  register: pulsaros_vxlan_service_ready
+  until: pulsaros_vxlan_service_ready.rc == 0

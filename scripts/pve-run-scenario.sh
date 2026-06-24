@@ -42,6 +42,9 @@ case "$SCENARIO" in
   topology-checks|linux-vxlan-reference)
     run_pytest topology-checks tests/test_kernel.py tests/test_topology_checks.py
     ;;
+  dpdk-vxlan-reference)
+    run_pytest dpdk-vxlan-reference tests/test_kernel.py tests/test_hugepages.py tests/test_dpdk_vxlan.py tests/test_topology_checks.py
+    ;;
   full)
     run_pytest kernel-smoke tests/test_kernel.py
     run_pytest dpdk-smoke tests/test_hugepages.py tests/test_dpdk.py
