@@ -8,11 +8,10 @@ import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 MODULE_PATH = ROOT / "scripts" / "render-topology.py"
-TOPOLOGY = ROOT / "topologies" / "linux-vxlan-reference.yml"
-MULTI_VTEP_TOPOLOGY = ROOT / "topologies" / "linux-vxlan-3vtep-3lan.yml"
-FOUR_VTEP_FULLMESH_TOPOLOGY = ROOT / "topologies" / "linux-vxlan-4vtep-fullmesh.yml"
-FOUR_VTEP_DUAL_RR_TOPOLOGY = ROOT / "topologies" / "linux-vxlan-4vtep-dual-rr.yml"
-DPDK_VXLAN_TOPOLOGY = ROOT / "topologies" / "dpdk-vxlan-reference.yml"
+TOPOLOGY = ROOT / "topologies" / "vxlan-reference.yml"
+MULTI_VTEP_TOPOLOGY = ROOT / "topologies" / "vxlan-3vtep-3lan.yml"
+FOUR_VTEP_FULLMESH_TOPOLOGY = ROOT / "topologies" / "vxlan-4vtep-fullmesh.yml"
+FOUR_VTEP_DUAL_RR_TOPOLOGY = ROOT / "topologies" / "vxlan-4vtep-dual-rr.yml"
 
 
 spec = importlib.util.spec_from_file_location("render_topology", MODULE_PATH)
@@ -40,7 +39,8 @@ def test_default_topology_renders_legacy_compat(monkeypatch):
 
     data = render_topology.render(TOPOLOGY)
 
-    assert data["name"] == "linux-vxlan-reference"
+    assert data["name"] == "vxlan-reference"
+    assert data["dataplane"] == {"type": "linux-vxlan"}
     assert data["hosts"]["client-a"]["vmid"] == 223457
     assert data["hosts"]["vtep-b"]["vm_name"] == "pulsar-123456-vtep-b"
     assert data["networks"]["left-l2"]["vnet"] == "pl123456"
@@ -50,8 +50,7 @@ def test_default_topology_renders_legacy_compat(monkeypatch):
     assert data["control_plane"]["type"] == "evpn"
     assert data["control_plane"]["peering"] == "full_mesh"
     assert data["control_plane"]["hosts"]["vtep-a"]["peers"][0]["host"] == "vtep-b"
-    assert data["plays"][0]["name"] == "Disable shell OSC context output"
-    assert data["plays"][0]["gather_facts"] is False
+    assert data["plays"] == []
     assert data["checks"][0]["name"] == "evpn-control-plane"
     assert data["checks"][1]["name"] == "overlay-ping"
     assert data["checks"][2]["captures"][0]["nic"] == "underlay"
@@ -97,18 +96,35 @@ def test_default_topology_resolves_ansible_vars(monkeypatch):
 def test_dpdk_vxlan_topology_renders_static_service(monkeypatch):
     base_env(monkeypatch)
 
-    data = render_topology.render(DPDK_VXLAN_TOPOLOGY)
+    data = render_topology.render(TOPOLOGY, dataplane="pulsaros-dpdk")
 
-    assert data["name"] == "dpdk-vxlan-reference"
+    assert data["name"] == "vxlan-reference"
+    assert data["dataplane"] == {"type": "pulsaros-dpdk"}
     assert data["control_plane"] == {"type": "static"}
     assert data["segments"]["default-lan"]["vni"] == 100
-    assert data["checks"][0]["type"] == "segment_ping_matrix"
-    assert data["checks"][1]["type"] == "segment_bidirectional_capture"
-    prepare_play = data["plays"][3]
-    assert prepare_play["vars"]["vxlan_dataplane_mode"] == "dpdk"
-    service_play = data["plays"][4]
-    assert service_play["vars"]["pulsaros_vxlan_runtime"] == "service"
-    assert "frr-evpn" not in service_play["roles"]
+    assert all(check["type"] != "evpn_control_plane" for check in data["checks"])
+    assert data["plays"] == []
+
+
+def test_dpdk_multi_vtep_filters_evpn_only_checks_and_faults(monkeypatch):
+    base_env(monkeypatch)
+
+    data = render_topology.render(MULTI_VTEP_TOPOLOGY, dataplane="pulsaros-dpdk")
+
+    assert data["control_plane"] == {"type": "static"}
+    assert all(check["type"] != "evpn_control_plane" for check in data["checks"])
+    fault_types = {fault["type"] for fault in data["faults"]}
+    assert "bgp_peer_shutdown" not in fault_types
+    assert {"mtu_mismatch", "vlan_mismatch", "bounce_vtep_underlay"} <= fault_types
+
+
+def test_rejects_unknown_dataplane(monkeypatch, capsys):
+    base_env(monkeypatch)
+
+    with pytest.raises(SystemExit):
+        render_topology.render(TOPOLOGY, dataplane="unknown")
+
+    assert "dataplane must be one of" in capsys.readouterr().err
 
 
 def test_bridge_mode_uses_legacy_vlan_tags(monkeypatch):
@@ -143,9 +159,7 @@ def test_multi_vtep_topology_renders_segments(monkeypatch):
     assert data["control_plane"]["hosts"]["vtep-a"]["route_reflector"] is True
     assert data["control_plane"]["hosts"]["vtep-b"]["peers"][0]["host"] == "vtep-a"
     assert data["control_plane"]["hosts"]["vtep-a"]["peers"][0]["route_reflector_client"] is True
-    assert data["plays"][0]["name"] == "Disable shell OSC context output"
-    assert data["plays"][0]["gather_facts"] is False
-    assert "pulsaros-vxlan" in data["plays"][2]["roles"]
+    assert data["plays"] == []
     assert data["checks"][0]["type"] == "evpn_control_plane"
     assert data["checks"][1]["type"] == "segment_ping_matrix"
     assert data["checks"][-1]["type"] == "segment_perf_probe"
@@ -159,7 +173,7 @@ def test_four_vtep_fullmesh_topology_renders_evpn_peers(monkeypatch):
     data = render_topology.render(FOUR_VTEP_FULLMESH_TOPOLOGY)
     control_plane = data["control_plane"]
 
-    assert data["name"] == "linux-vxlan-4vtep-fullmesh"
+    assert data["name"] == "vxlan-4vtep-fullmesh"
     assert control_plane["asn"] == 65040
     assert control_plane["peering"] == "full_mesh"
     assert sorted(control_plane["hosts"]) == ["vtep-a", "vtep-b", "vtep-c", "vtep-d"]
@@ -169,7 +183,6 @@ def test_four_vtep_fullmesh_topology_renders_evpn_peers(monkeypatch):
         assert host not in {peer["host"] for peer in metadata["peers"]}
         assert metadata["vnis"] == [10400]
     assert data["checks"][0]["type"] == "evpn_control_plane"
-    assert "pulsaros-vxlan" in data["plays"][2]["roles"]
     assert data["faults"][0]["type"] == "bgp_peer_shutdown"
 
 
@@ -179,7 +192,7 @@ def test_four_vtep_dual_rr_topology_renders_rr_clients(monkeypatch):
     data = render_topology.render(FOUR_VTEP_DUAL_RR_TOPOLOGY)
     control_plane = data["control_plane"]
 
-    assert data["name"] == "linux-vxlan-4vtep-dual-rr"
+    assert data["name"] == "vxlan-4vtep-dual-rr"
     assert control_plane["asn"] == 65050
     assert control_plane["peering"] == "route_reflector"
     assert control_plane["route_reflectors"] == ["vtep-a", "vtep-b"]
@@ -195,7 +208,6 @@ def test_four_vtep_dual_rr_topology_renders_rr_clients(monkeypatch):
     assert {peer["host"] for peer in rr_client_peers} == {"vtep-c", "vtep-d"}
     assert control_plane["hosts"]["vtep-c"]["vnis"] == [10500]
     assert data["checks"][0]["type"] == "evpn_control_plane"
-    assert "pulsaros-vxlan" in data["plays"][2]["roles"]
     assert data["faults"][0]["type"] == "frr_restart"
     assert data["faults"][0]["expected_impact"] == "no_outage"
 

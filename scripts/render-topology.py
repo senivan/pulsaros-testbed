@@ -18,6 +18,7 @@ INVENTORY = ROOT / "ansible" / "inventory.generated.ini"
 PLAYBOOK = ROOT / "ansible" / "site.generated.yml"
 TOPOLOGY_JSON = ARTIFACTS / "topology.json"
 TOPOLOGY_ENV = ARTIFACTS / "topology.env"
+DATAPLANES = ("linux-vxlan", "pulsaros-dpdk")
 
 
 def die(message):
@@ -71,6 +72,32 @@ def validate_unique(values, label):
         if value in seen:
             die(f"duplicate {label}: {value}")
         seen.add(value)
+
+
+def resolve_dataplane(value=None):
+    dataplane = value or os.environ.get("DATAPLANE", "linux-vxlan")
+    if dataplane not in DATAPLANES:
+        die(f"dataplane must be one of {', '.join(DATAPLANES)}, got: {dataplane}")
+    return dataplane
+
+
+def filter_for_dataplane(items, dataplane, label):
+    selected = []
+    for index, item in enumerate(items or []):
+        if not isinstance(item, dict):
+            selected.append(item)
+            continue
+        supported = item.get("dataplanes")
+        if supported is not None:
+            if not isinstance(supported, list) or not supported:
+                die(f"{label} {index} dataplanes must be a non-empty list")
+            unknown = sorted(set(supported) - set(DATAPLANES))
+            if unknown:
+                die(f"{label} {index} has unsupported dataplanes: {', '.join(unknown)}")
+            if dataplane not in supported:
+                continue
+        selected.append({key: value for key, value in item.items() if key != "dataplanes"})
+    return selected
 
 
 def validate_host_ref(hosts, host_name, label):
@@ -613,11 +640,12 @@ def validate_faults(hosts, faults, segments=None, control_plane=None):
     return faults
 
 
-def render(topology_path, previous=None):
+def render(topology_path, previous=None, dataplane=None):
     source = load_yaml(topology_path)
     if source.get("schema_version") != 1:
         die("only topology schema_version 1 is supported")
 
+    dataplane = resolve_dataplane(dataplane)
     run_id = env_int("RUN_ID")
     network_mode = env_str("NETWORK_MODE", "qinq")
     if network_mode not in ("qinq", "bridge"):
@@ -719,7 +747,10 @@ def render(topology_path, previous=None):
     validate_unique(all_mac_offsets, "mac_offset")
     segments = validate_segments(hosts, source.get("segments", {}))
     resolved_segments = resolve_segments(hosts, segments)
-    control_plane = validate_control_plane(hosts, resolved_segments, source.get("control_plane"))
+    requested_control_plane = source.get("control_plane")
+    if dataplane == "pulsaros-dpdk":
+        requested_control_plane = {"type": "static"}
+    control_plane = validate_control_plane(hosts, resolved_segments, requested_control_plane)
     resolved = {
         "schema_version": 1,
         "name": source["name"],
@@ -731,6 +762,7 @@ def render(topology_path, previous=None):
         "networks": networks,
         "hosts": hosts,
         "segments": resolved_segments,
+        "dataplane": {"type": dataplane},
         "control_plane": resolve_control_plane(control_plane, resolved_segments),
         "plays": source.get("plays", []),
         "compat": source.get("compat", {}),
@@ -743,16 +775,18 @@ def render(topology_path, previous=None):
             "mtu": env_int("QINQ_MTU", 1496),
             "ipam": env_str("QINQ_IPAM", "pve"),
         }
+    raw_checks = filter_for_dataplane(source.get("checks", []), dataplane, "check")
     checks = validate_checks(
         hosts,
-        source.get("checks", []),
+        raw_checks,
         resolved["segments"],
         resolved["control_plane"],
     )
     resolved["checks"] = resolve_tokens(resolved, {}, checks)
+    raw_faults = filter_for_dataplane(source.get("faults", []), dataplane, "fault")
     faults = validate_faults(
         hosts,
-        source.get("faults", []),
+        raw_faults,
         resolved["segments"],
         resolved["control_plane"],
     )
@@ -810,6 +844,7 @@ def write_env(data):
         "RUN_ID": data["run_id"],
         "TOPOLOGY": data["name"],
         "NETWORK_MODE": data["network_mode"],
+        "DATAPLANE": data["dataplane"]["type"],
         "BASE": data["base"],
     }
     if data["network_mode"] == "qinq":
@@ -853,6 +888,8 @@ def write_inventory(data):
             f"ansible_user={user}",
             f"ansible_ssh_private_key_file={key}",
             "ansible_ssh_common_args='-o StrictHostKeyChecking=no'",
+            f"vxlan_dataplane={data['dataplane']['type']}",
+            f"vxlan_control_plane_type={data['control_plane']['type']}",
             "",
         ]
     )
@@ -860,7 +897,11 @@ def write_inventory(data):
 
 
 def write_playbook(data):
-    PLAYBOOK.write_text(yaml.safe_dump(data["plays"], sort_keys=False), encoding="utf-8")
+    if data.get("plays"):
+        content = yaml.safe_dump(data["plays"], sort_keys=False)
+    else:
+        content = (ROOT / "ansible" / "site.yml").read_text(encoding="utf-8")
+    PLAYBOOK.write_text(content, encoding="utf-8")
 
 
 def load_resolved():
@@ -873,7 +914,7 @@ def cmd_render(args):
     previous = None
     if TOPOLOGY_JSON.exists():
         previous = load_resolved()
-    data = render(args.topology_file, previous=previous)
+    data = render(args.topology_file, previous=previous, dataplane=getattr(args, "dataplane", None))
     write_json(data)
     write_env(data)
 
@@ -886,7 +927,7 @@ def cmd_validate(args):
     os.environ.setdefault("TEST_BRIDGE", "vmbr-test")
     os.environ.setdefault("QINQ_SERVICE_VLAN_BASE", "3000")
     os.environ.setdefault("QINQ_SERVICE_VLAN_COUNT", "500")
-    render(args.topology_file)
+    render(args.topology_file, dataplane=getattr(args, "dataplane", None))
     print(f"render-topology: validated {args.topology_file}")
 
 
@@ -917,9 +958,11 @@ def main():
     sub = parser.add_subparsers(dest="command", required=True)
     render_parser = sub.add_parser("render")
     render_parser.add_argument("--topology-file", required=True)
+    render_parser.add_argument("--dataplane", choices=DATAPLANES)
     render_parser.set_defaults(func=cmd_render)
     validate_parser = sub.add_parser("validate")
     validate_parser.add_argument("--topology-file", required=True)
+    validate_parser.add_argument("--dataplane", choices=DATAPLANES)
     validate_parser.set_defaults(func=cmd_validate)
     update_parser = sub.add_parser("update-ips")
     update_parser.add_argument("host_ip", nargs="+")

@@ -314,6 +314,37 @@ def _decode_name(check_name, capture):
 
 def _start_capture(topology, ssh_user, ssh_key, check_name, capture):
     nic = host_nic(topology, capture["host"], capture["nic"])
+    resolved = topology["__resolved__"]
+    if resolved.get("dataplane", {}).get("type") == "pulsaros-dpdk":
+        host = resolved["hosts"][capture["host"]]
+        nic_index = next(
+            index for index, candidate in enumerate(host["nics"])
+            if candidate["name"] == capture["nic"]
+        )
+        capture_if = f"tap{host['vmid']}i{nic_index}"
+        local_pcap = PCAPS / _pcap_name(check_name, capture)
+        local_decode = LOGS / _decode_name(check_name, capture)
+        PCAPS.mkdir(parents=True, exist_ok=True)
+        LOGS.mkdir(parents=True, exist_ok=True)
+        subprocess.run(["sudo", "-n", "rm", "-f", str(local_pcap)], check=True)
+        if not pathlib.Path("/sys/class/net", capture_if).exists():
+            pytest.fail(f"Proxmox capture interface does not exist: {capture_if}")
+        process = subprocess.Popen(
+            [
+                "sudo", "-n", "timeout", "20", "tcpdump", "-U", "-i", capture_if,
+                "-w", str(local_pcap), *shlex.split(capture["filter"]),
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        return {
+            "host": capture["host"],
+            "local_pcap": local_pcap,
+            "local_decode": local_decode,
+            "process": process,
+            "provider": "proxmox-tap",
+        }
+
     capture_if = iface_by_mac(topology, ssh_user, ssh_key, capture["host"], nic["mac"])
     remote_pcap = f"/tmp/pulsaros-testbed/{_pcap_name(check_name, capture)}"
     local_pcap = PCAPS / _pcap_name(check_name, capture)
@@ -351,6 +382,7 @@ def _start_capture(topology, ssh_user, ssh_key, check_name, capture):
         "local_pcap": local_pcap,
         "local_decode": local_decode,
         "process": process,
+        "provider": "guest",
     }
 
 
@@ -366,6 +398,32 @@ def _stop_capture(capture):
 
 
 def _collect_capture(topology, ssh_user, ssh_key, capture):
+    if capture.get("provider") == "proxmox-tap":
+        local_pcap = pathlib.Path(capture["local_pcap"])
+        subprocess.run(["sudo", "-n", "chmod", "0644", str(local_pcap)], check=False)
+        if not local_pcap.exists() or local_pcap.stat().st_size <= 24:
+            pytest.fail(f"empty Proxmox tap capture: {local_pcap}")
+        count_result = subprocess.run(
+            ["sudo", "-n", "tcpdump", "-nn", "-r", str(local_pcap)],
+            text=True,
+            capture_output=True,
+            timeout=30,
+        )
+        decoded = subprocess.run(
+            ["sudo", "-n", "tcpdump", "-nn", "-e", "-vv", "-r", str(local_pcap)],
+            text=True,
+            capture_output=True,
+            timeout=30,
+        )
+        if decoded.returncode != 0:
+            pytest.fail(f"failed to decode {local_pcap}: {decoded.stderr}")
+        count = len([line for line in count_result.stdout.splitlines() if line.strip()])
+        pathlib.Path(capture["local_decode"]).write_text(
+            f"PULSAROS_PACKET_COUNT={count}\n{decoded.stdout}{decoded.stderr}",
+            encoding="utf-8",
+        )
+        return
+
     ssh(
         topology,
         ssh_user,
@@ -453,8 +511,21 @@ def _assert_captures(captures, assertions):
     _assert_decoded_capture(decoded_text, assertions, label)
 
 
+def _raise_capture_outcomes(trigger_error, capture_error):
+    if trigger_error is not None and capture_error is not None:
+        pytest.fail(
+            f"traffic trigger failed: {trigger_error}\n"
+            f"capture collection or validation also failed: {capture_error}"
+        )
+    if capture_error is not None:
+        raise capture_error
+    if trigger_error is not None:
+        raise trigger_error
+
+
 def _run_packet_capture_check(topology, ssh_user, ssh_key, check):
     captures = []
+    trigger_error = None
     try:
         captures = [
             _start_capture(topology, ssh_user, ssh_key, check["name"], capture)
@@ -463,13 +534,20 @@ def _run_packet_capture_check(topology, ssh_user, ssh_key, check):
         time.sleep(_check_value(check, "settle", 2))
         _run_ping_check(topology, ssh_user, ssh_key, check["trigger"])
         time.sleep(_check_value(check, "post_trigger_wait", 3))
+    except BaseException as error:
+        trigger_error = error
     finally:
         for capture in captures:
             _stop_capture(capture)
 
-    for capture in captures:
-        _collect_capture(topology, ssh_user, ssh_key, capture)
-    _assert_captures(captures, check.get("assertions", {}))
+    capture_error = None
+    try:
+        for capture in captures:
+            _collect_capture(topology, ssh_user, ssh_key, capture)
+        _assert_captures(captures, check.get("assertions", {}))
+    except BaseException as error:
+        capture_error = error
+    _raise_capture_outcomes(trigger_error, capture_error)
 
 
 def _segment_capture_assertions(segment, pairs, check):
@@ -493,6 +571,7 @@ def _run_segment_bidirectional_capture_check(topology, ssh_user, ssh_key, check)
     captures = []
     pairs = _check_pairs(segment, check)
     assertions = _segment_capture_assertions(segment, pairs, check)
+    trigger_error = None
     try:
         captures = [
             _start_capture(topology, ssh_user, ssh_key, check["name"], capture)
@@ -509,13 +588,20 @@ def _run_segment_bidirectional_capture_check(topology, ssh_user, ssh_key, check)
             }
             _run_ping_check(topology, ssh_user, ssh_key, ping_check)
         time.sleep(_check_value(check, "post_trigger_wait", 3))
+    except BaseException as error:
+        trigger_error = error
     finally:
         for capture in captures:
             _stop_capture(capture)
 
-    for capture in captures:
-        _collect_capture(topology, ssh_user, ssh_key, capture)
-    _assert_captures(captures, assertions)
+    capture_error = None
+    try:
+        for capture in captures:
+            _collect_capture(topology, ssh_user, ssh_key, capture)
+        _assert_captures(captures, assertions)
+    except BaseException as error:
+        capture_error = error
+    _raise_capture_outcomes(trigger_error, capture_error)
 
 
 def _lua_string(value):

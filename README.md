@@ -116,7 +116,7 @@ experiment intent. A topology can declare:
 
 - logical Proxmox dataplane networks
 - hosts, VMID offsets, groups, and NICs
-- generated Ansible plays
+- an optional custom Ansible play override
 - VXLAN `segments`
 - success-path `checks`
 - injected `faults`
@@ -125,7 +125,7 @@ experiment intent. A topology can declare:
 The reference topology is intentionally small:
 
 ```text
-topologies/linux-vxlan-reference.yml
+topologies/vxlan-reference.yml
 
 client-a -- vtep-a == underlay == vtep-b -- client-b
 ```
@@ -133,7 +133,7 @@ client-a -- vtep-a == underlay == vtep-b -- client-b
 The larger topology is designed to exercise topology-agnostic behavior:
 
 ```text
-topologies/linux-vxlan-3vtep-3lan.yml
+topologies/vxlan-3vtep-3lan.yml
 
 VTEPs:       vtep-a, vtep-b, vtep-c
 Segments:    red, blue, green
@@ -145,8 +145,8 @@ Underlay:    shared VTEP underlay network
 Additional FRR EVPN control-plane examples focus on peering shape:
 
 ```text
-topologies/linux-vxlan-4vtep-fullmesh.yml
-topologies/linux-vxlan-4vtep-dual-rr.yml
+topologies/vxlan-4vtep-fullmesh.yml
+topologies/vxlan-4vtep-dual-rr.yml
 
 VTEPs:       vtep-a, vtep-b, vtep-c, vtep-d
 Segment:     tenant-a
@@ -156,30 +156,24 @@ Control:     full mesh, or dual route-reflector with vtep-a/vtep-b as RRs
 Validate a topology without touching Proxmox:
 
 ```bash
-./scripts/render-topology.py validate --topology-file topologies/linux-vxlan-3vtep-3lan.yml
+./scripts/render-topology.py validate --topology-file topologies/vxlan-3vtep-3lan.yml --dataplane pulsaros-dpdk
 ```
 
 ## VXLAN EVPN Experiment Semantics
 
-The current VXLAN implementation uses Linux bridges and Linux VXLAN devices for
-the dataplane, with FRR providing the EVPN control plane for bundled tests.
-Static VXLAN flood entries remain a compatibility path for topologies without
-`control_plane: {type: evpn}`.
+Each logical topology can use `linux-vxlan` or `pulsaros-dpdk`. Linux uses
+kernel bridges/VXLAN devices and may use FRR EVPN. PulsarOS uses static peers,
+binds VTEP access and underlay virtio PCI functions to `uio_pci_generic`, and
+runs the DPDK forwarding service with physical PCI ports. The management NIC
+always remains kernel-owned.
 
-The testbed also deploys the `PulsarOS-vxlan` DPDK dataplane application on
-VTEPs. The Ansible role builds the app from git, renders a per-host config from
-the resolved topology, and runs an initialization smoke check. Linux VXLAN
-remains the traffic-carrying dataplane until `PulsarOS-vxlan` has a persistent
-forwarding loop.
+For each topology segment, the selected backend configures:
 
-For each topology segment, the Ansible role configures:
-
-- one bridge named from the VNI, for example `br-10100`
-- one VXLAN device named from the VNI, for example `vx-10100`
 - one VNI per segment
 - one underlay address per participating VTEP
-- FRR BGP EVPN peering between VTEPs
 - local access NICs or trunk VLAN subinterfaces for clients
+- Linux bridge/VXLAN devices and optional FRR BGP EVPN peering for `linux-vxlan`
+- UIO-bound physical DPDK ports and static remote peers for `pulsaros-dpdk`
 
 The expected properties are:
 
@@ -188,7 +182,7 @@ The expected properties are:
 - decoded pcaps contain the expected VNI
 - decoded pcaps preserve expected inner client IPs
 - decoded pcaps use expected outer VTEP underlay IPs
-- FRR reports the expected EVPN peers and VNIs
+- FRR reports the expected EVPN peers and VNIs when EVPN is selected
 - trunk clients communicate only on the declared VLAN
 - injected faults affect the intended path
 - restore operations recover the path without rebuilding the testbed
@@ -288,6 +282,7 @@ upload RPM artifact
 download RPMs on Proxmox runner
 install RPMs in every VM
 reuse the template kernel's known-good root boot arguments
+apply the selected PulsarOS kernel DPDK runtime profile
 reboot guests
 wait for SSH
 verify uname -r contains the expected PulsarOS release
@@ -297,6 +292,11 @@ run scenario tests
 The boot-argument reuse is intentional. It prevents generated kernel package
 defaults from replacing the template's known-good root, filesystem, LVM, or
 device-mapper arguments.
+
+For PR-3-style PulsarOS kernel RPMs, the testbed also applies the selected
+runtime profile from the installed package. The workflow input
+`kernel_dpdk_profile` defaults to `dpdk-vm`, applies to all custom-kernel VMs,
+and can be set to `none` to keep the template runtime behavior.
 
 Direct RPM testing is also supported:
 
@@ -325,14 +325,16 @@ Recommended full multi-VTEP custom-kernel inputs:
 
 ```text
 scenario=full
-topology=linux-vxlan-3vtep-3lan
+topology=vxlan-3vtep-3lan
+dataplane=pulsaros-dpdk
 storage=DATA
 network_mode=qinq
 sdn_bridge=vmbr-test
 kernel_source=pulsaros-kernel-git
 kernel_repo=https://github.com/senivan/PulsarOS-kernel.git
 kernel_ref=main
-kernel_version=6.16
+kernel_version=7.0.9
+kernel_dpdk_profile=dpdk-vm
 keep_vms_on_failure=false
 ```
 
@@ -340,7 +342,8 @@ Faster reference run:
 
 ```text
 scenario=topology-checks
-topology=linux-vxlan-reference
+topology=vxlan-reference
+dataplane=linux-vxlan
 kernel_source=none
 ```
 
@@ -370,7 +373,8 @@ Run the reference topology:
 
 ```bash
 export RUN_ID="$(date +%s)"
-export TOPOLOGY=linux-vxlan-reference
+export TOPOLOGY=vxlan-reference
+export DATAPLANE=linux-vxlan
 export SCENARIO=topology-checks
 
 make preflight
@@ -386,7 +390,8 @@ make destroy
 Run the larger topology:
 
 ```bash
-export TOPOLOGY=linux-vxlan-3vtep-3lan
+export TOPOLOGY=vxlan-3vtep-3lan
+export DATAPLANE=pulsaros-dpdk
 export SCENARIO=full
 ```
 

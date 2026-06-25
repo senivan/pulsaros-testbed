@@ -1,33 +1,33 @@
 schema_version: 1
-name: linux-vxlan-4vtep-dual-rr
-description: Four-VTEP single-segment VXLAN EVPN topology with two FRR route reflectors.
+name: vxlan-4vtep-fullmesh
+description: Four-VTEP single-segment VXLAN EVPN topology with full-mesh FRR peering.
 
 networks:
   underlay:
     mode: access
-    vnet_prefix: ru
-    inner_vlan: 302
-    legacy_vlan_offset: 52
+    vnet_prefix: fu
+    inner_vlan: 202
+    legacy_vlan_offset: 42
   edge-a:
     mode: access
-    vnet_prefix: da
-    inner_vlan: 311
-    legacy_vlan_offset: 53
+    vnet_prefix: fa
+    inner_vlan: 211
+    legacy_vlan_offset: 43
   edge-b:
     mode: access
-    vnet_prefix: db
-    inner_vlan: 312
-    legacy_vlan_offset: 54
+    vnet_prefix: fb
+    inner_vlan: 212
+    legacy_vlan_offset: 44
   edge-c:
     mode: access
-    vnet_prefix: dc
-    inner_vlan: 313
-    legacy_vlan_offset: 55
+    vnet_prefix: fc
+    inner_vlan: 213
+    legacy_vlan_offset: 45
   edge-d:
     mode: access
-    vnet_prefix: dd
-    inner_vlan: 314
-    legacy_vlan_offset: 56
+    vnet_prefix: fd
+    inner_vlan: 214
+    legacy_vlan_offset: 46
 
 hosts:
   vtep-a:
@@ -148,97 +148,55 @@ hosts:
 
 segments:
   tenant-a:
-    vni: 10500
+    vni: 10400
     vteps:
       - host: vtep-a
         underlay_nic: underlay
-        underlay_ip: 172.16.105.1/24
+        underlay_ip: 172.16.104.1/24
         local_nics:
           - edge
       - host: vtep-b
         underlay_nic: underlay
-        underlay_ip: 172.16.105.2/24
+        underlay_ip: 172.16.104.2/24
         local_nics:
           - edge
       - host: vtep-c
         underlay_nic: underlay
-        underlay_ip: 172.16.105.3/24
+        underlay_ip: 172.16.104.3/24
         local_nics:
           - edge
       - host: vtep-d
         underlay_nic: underlay
-        underlay_ip: 172.16.105.4/24
+        underlay_ip: 172.16.104.4/24
         local_nics:
           - edge
     members:
       - host: client-a
         nic: data
         mode: access
-        ip: 10.10.50.11/24
+        ip: 10.10.40.11/24
       - host: client-b
         nic: data
         mode: access
-        ip: 10.10.50.12/24
+        ip: 10.10.40.12/24
       - host: client-c
         nic: data
         mode: access
-        ip: 10.10.50.13/24
+        ip: 10.10.40.13/24
       - host: client-d
         nic: data
         mode: access
-        ip: 10.10.50.14/24
+        ip: 10.10.40.14/24
 
 control_plane:
   type: evpn
-  asn: 65050
-  peering: route_reflector
-  route_reflectors:
-    - vtep-a
-    - vtep-b
-
-plays:
-  - name: Disable shell OSC context output
-    hosts: all
-    become: true
-    gather_facts: false
-    tasks:
-      - name: Disable systemd OSC context shell profile
-        ansible.builtin.raw: |
-          for path in \
-            /etc/profile.d/80-systemd-osc-context.sh \
-            /usr/lib/systemd/profile.d/80-systemd-osc-context.sh; do
-            if [ -e "$path" ]; then
-              mv "$path" "$path.pulsaros-disabled"
-            fi
-          done
-        changed_when: false
-  - name: Provision all testbed VMs
-    hosts: all
-    become: true
-    roles:
-      - common
-      - kernel
-  - name: Provision VTEP dataplane prerequisites
-    hosts: vteps
-    become: true
-    roles:
-      - hugepages
-      - dpdk
-      - pulsaros-vxlan
-  - name: Configure 4-VTEP VXLAN EVPN route reflector topology
-    hosts: all
-    become: true
-    roles:
-      - vxlan-test
-  - name: Configure FRR EVPN control plane
-    hosts: vteps
-    become: true
-    roles:
-      - frr-evpn
+  asn: 65040
+  peering: full_mesh
 
 checks:
   - name: evpn-control-plane
     type: evpn_control_plane
+    dataplanes: [linux-vxlan]
     timeout: 60
 
   - name: tenant-a-ping-matrix
@@ -290,12 +248,12 @@ checks:
       max_rtt_avg_ms: 10
 
 faults:
-  - name: tenant-a-frr-restart-client-c
-    type: frr_restart
+  - name: tenant-a-bgp-peer-shutdown-a-to-d
+    type: bgp_peer_shutdown
+    dataplanes: [linux-vxlan]
     segment: tenant-a
-    expected_impact: no_outage
     settle: 5
     recover_timeout: 45
     pairs:
       - source: client-a.data
-        destination: client-c.data
+        destination: client-d.data

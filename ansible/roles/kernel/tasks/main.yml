@@ -13,10 +13,11 @@
     kernel_source: "{{ lookup('ansible.builtin.env', 'KERNEL_SOURCE') | default('none', true) }}"
     kernel_expected_release: "{{ lookup('ansible.builtin.env', 'KERNEL_EXPECTED_RELEASE') | default('', true) }}"
     kernel_dpdk_profile_requested: "{{ lookup('ansible.builtin.env', 'KERNEL_DPDK_PROFILE') | default('dpdk-vm', true) }}"
+    kernel_dataplane: "{{ lookup('ansible.builtin.env', 'DATAPLANE') | default('linux-vxlan', true) }}"
 
 - name: Select host kernel DPDK profile
   ansible.builtin.set_fact:
-    kernel_dpdk_profile: "{{ kernel_dpdk_profile_requested if 'vteps' in group_names else 'none' }}"
+    kernel_dpdk_profile: "{{ kernel_dpdk_profile_requested if kernel_dataplane == 'pulsaros-dpdk' and 'vteps' in group_names else 'none' }}"
 
 - name: Report template kernel path
   ansible.builtin.debug:
@@ -268,6 +269,10 @@
       require_builtin_or_module CONFIG_VIRTIO
       require_builtin_or_module CONFIG_VIRTIO_PCI
       require_builtin_or_module CONFIG_VIRTIO_NET
+      if [ "${KERNEL_DPDK_PROFILE}" != "none" ]; then
+        require_builtin_or_module CONFIG_UIO
+        require_builtin_or_module CONFIG_UIO_PCI_GENERIC
+      fi
       require_builtin_or_module CONFIG_SERIAL_8250
       require_builtin_or_module CONFIG_SERIAL_8250_CONSOLE
 

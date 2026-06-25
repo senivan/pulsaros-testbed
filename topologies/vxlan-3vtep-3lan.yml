@@ -1,5 +1,5 @@
 schema_version: 1
-name: linux-vxlan-3vtep-3lan
+name: vxlan-3vtep-3lan
 description: Three-VTEP VXLAN EVPN topology with access and trunk client LANs.
 
 networks:
@@ -347,49 +347,10 @@ control_plane:
   route_reflectors:
     - vtep-a
 
-plays:
-  - name: Disable shell OSC context output
-    hosts: all
-    become: true
-    gather_facts: false
-    tasks:
-      - name: Disable systemd OSC context shell profile
-        ansible.builtin.raw: |
-          for path in \
-            /etc/profile.d/80-systemd-osc-context.sh \
-            /usr/lib/systemd/profile.d/80-systemd-osc-context.sh; do
-            if [ -e "$path" ]; then
-              mv "$path" "$path.pulsaros-disabled"
-            fi
-          done
-        changed_when: false
-  - name: Provision all testbed VMs
-    hosts: all
-    become: true
-    roles:
-      - common
-      - kernel
-  - name: Provision VTEP dataplane prerequisites
-    hosts: vteps
-    become: true
-    roles:
-      - hugepages
-      - dpdk
-      - pulsaros-vxlan
-  - name: Configure multi-VTEP VXLAN EVPN topology
-    hosts: all
-    become: true
-    roles:
-      - vxlan-test
-  - name: Configure FRR EVPN control plane
-    hosts: vteps
-    become: true
-    roles:
-      - frr-evpn
-
 checks:
   - name: evpn-control-plane
     type: evpn_control_plane
+    dataplanes: [linux-vxlan]
     timeout: 60
 
   - name: red-lan-ping-matrix
@@ -524,6 +485,7 @@ checks:
 faults:
   - name: red-bgp-peer-shutdown-a-to-b
     type: bgp_peer_shutdown
+    dataplanes: [linux-vxlan]
     segment: red
     settle: 5
     recover_timeout: 45

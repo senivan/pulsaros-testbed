@@ -170,6 +170,8 @@ collect_host() {
   collect_cmd "$host" "$ip" journal "sudo journalctl -b --no-pager || journalctl -b --no-pager"
   collect_cmd "$host" "$ip" ip-link "ip link"
   collect_cmd "$host" "$ip" ip-addr "ip addr"
+  collect_cmd "$host" "$ip" pci-drivers "lspci -nnk || true"
+  collect_cmd "$host" "$ip" pulsaros-vxlan "sudo sh -c 'systemctl status pulsaros-vxlan --no-pager || true; journalctl -b -u pulsaros-vxlan --no-pager || true; echo === pci-map; cat /etc/pulsaros/vxlan/pci-map.json 2>/dev/null || true; echo === config; cat /etc/pulsaros/vxlan/config.json 2>/dev/null || true'"
   collect_cmd "$host" "$ip" uname "uname -a"
   collect_cmd "$host" "$ip" kernel-rpms "rpm -qa 'kernel*' | sort || true"
   collect_cmd "$host" "$ip" kernel-boot "sudo grubby --info=DEFAULT || true; findmnt / || true; cat /proc/cmdline || true"

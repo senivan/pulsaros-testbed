@@ -3,7 +3,7 @@
 Each test run renders a topology YAML file, then creates disposable linked-clone
 VMs from a Proxmox template by default. Set `PVE_FULL_CLONE=1` to use full
 clones when storage isolation or template compatibility requires it. The
-default topology in `topologies/linux-vxlan-reference.yml` creates:
+default topology in `topologies/vxlan-reference.yml` creates:
 
 ```text
 pulsar-${RUN_ID}-client-a
@@ -39,8 +39,8 @@ ansible/site.generated.yml
 ```
 
 Add new topologies as YAML files under `topologies/`. A topology declares
-networks, hosts, NICs, Ansible host variables, generated playbook roles, and
-scenario acceptance checks. Compatibility aliases are still rendered for older
+networks, hosts, NICs, Ansible host variables, and scenario acceptance checks.
+The selected `DATAPLANE` chooses the centralized deployment roles. Compatibility aliases are still rendered for older
 scripts, but topology-specific pytest assertions should consume the resolved
 JSON and the topology-declared `checks:` section instead of hard-coding host
 names. The generic topology check runner supports ping checks, FRR EVPN
@@ -48,14 +48,11 @@ control-plane checks, tcpdump-backed packet capture checks with decoded-output
 assertions, bidirectional segment capture checks, and client-side `pktgen_dpdk`
 traffic generation checks.
 
-Topologies may also declare `segments` for topology-driven Linux VXLAN
-configuration. Each segment defines one VNI, participating VTEPs, local VTEP
-LAN NICs, and access or trunk client members. The `vxlan-test` Ansible role
-reads the resolved topology JSON and configures the Linux bridge/VXLAN
-dataplane. For bundled EVPN topologies, the `frr-evpn` role configures FRR BGP
-EVPN peering and FRR handles remote VTEP reachability. Static VXLAN flood
-entries are only configured for topologies without `control_plane: {type:
-evpn}`.
+Topologies declare backend-neutral `segments`. With `linux-vxlan`, the
+`vxlan-test` role creates kernel bridge/VXLAN devices and `frr-evpn` configures
+EVPN when requested. With `pulsaros-dpdk`, access and underlay virtio PCI
+functions are bound to `uio_pci_generic`, the application receives their PCI
+BDFs as physical DPDK ports, and peer reachability is static.
 
 The four-VTEP topologies are control-plane-focused examples: one renders a
 full-mesh FRR EVPN graph, and one renders a dual route-reflector graph where

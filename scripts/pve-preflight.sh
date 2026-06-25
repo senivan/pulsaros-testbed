@@ -24,7 +24,12 @@ esac
 if [[ "$PVE_FULL_CLONE" == "1" ]]; then
   need_env STORAGE
 fi
-TOPOLOGY="${TOPOLOGY:-linux-vxlan-reference}"
+TOPOLOGY="${TOPOLOGY:-vxlan-reference}"
+DATAPLANE="${DATAPLANE:-linux-vxlan}"
+case "$DATAPLANE" in
+  linux-vxlan|pulsaros-dpdk) ;;
+  *) die "DATAPLANE must be linux-vxlan or pulsaros-dpdk, got: $DATAPLANE" ;;
+esac
 TOPOLOGY_FILE="${TOPOLOGY_FILE:-topologies/${TOPOLOGY}.yml}"
 [[ -f "$TOPOLOGY_FILE" ]] || die "topology file not found: $TOPOLOGY_FILE"
 NETWORK_MODE="${NETWORK_MODE:-qinq}"

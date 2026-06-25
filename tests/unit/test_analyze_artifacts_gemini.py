@@ -17,7 +17,7 @@ def test_topology_summary_keeps_segment_expectations():
     module = load_module()
     summary = module.topology_summary(
         {
-            "name": "linux-vxlan-3vtep-3lan",
+            "name": "vxlan-3vtep-3lan",
             "description": "test topology",
             "network_mode": "qinq",
             "hosts": {
@@ -56,7 +56,7 @@ def test_topology_summary_keeps_segment_expectations():
         }
     )
 
-    assert summary["name"] == "linux-vxlan-3vtep-3lan"
+    assert summary["name"] == "vxlan-3vtep-3lan"
     assert summary["segments"]["blue"]["members"][0]["ip"] == "10.10.20.11/24"
     assert summary["checks"][0]["segment"] == "blue"
 
@@ -67,7 +67,7 @@ def test_gemini_prompt_uses_artifact_topology_not_legacy_reference():
         {
             "run": {"github_run_id": "1", "scenario": "full", "runner_name": "runner"},
             "topology": {
-                "name": "linux-vxlan-3vtep-3lan",
+                "name": "vxlan-3vtep-3lan",
                 "segments": {
                     "blue": {
                         "members": [
@@ -81,7 +81,7 @@ def test_gemini_prompt_uses_artifact_topology_not_legacy_reference():
                     }
                 },
             },
-            "topology_env": "TOPOLOGY=linux-vxlan-3vtep-3lan\n",
+            "topology_env": "TOPOLOGY=vxlan-3vtep-3lan\n",
             "artifact_text": {},
             "junit": [],
             "pcaps": [],
@@ -90,7 +90,7 @@ def test_gemini_prompt_uses_artifact_topology_not_legacy_reference():
     )
 
     assert "artifacts/topology.json" in prompt
-    assert "linux-vxlan-3vtep-3lan" in prompt
+    assert "vxlan-3vtep-3lan" in prompt
     assert "10.10.20.11/24" in prompt
     assert "Treat this expected topology as authoritative" not in prompt
     assert "10.10.0.1/24" not in prompt

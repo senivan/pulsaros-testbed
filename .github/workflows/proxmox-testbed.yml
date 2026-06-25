@@ -11,13 +11,20 @@ on:
         options:
           - kernel-smoke
           - dpdk-smoke
-          - dpdk-vxlan-reference
           - topology-checks
           - full
       topology:
         description: "Topology YAML name from topologies/"
         required: true
-        default: "linux-vxlan-reference"
+        default: "vxlan-reference"
+      dataplane:
+        description: "VXLAN dataplane implementation"
+        required: true
+        default: "linux-vxlan"
+        type: choice
+        options:
+          - linux-vxlan
+          - pulsaros-dpdk
       template_vmid:
         description: "Proxmox template VMID"
         required: true
@@ -241,6 +248,7 @@ jobs:
       RUN_ID: ${{ github.run_id }}
       SCENARIO: ${{ inputs.scenario }}
       TOPOLOGY: ${{ inputs.topology }}
+      DATAPLANE: ${{ inputs.dataplane }}
       TEMPLATE_ID: ${{ inputs.template_vmid }}
       STORAGE: ${{ inputs.storage }}
       PVE_FULL_CLONE: ${{ inputs.pve_full_clone }}
