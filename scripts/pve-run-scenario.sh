@@ -37,17 +37,24 @@ case "$SCENARIO" in
     run_pytest kernel-smoke tests/test_kernel.py
     ;;
   dpdk-smoke)
-    run_pytest dpdk-smoke tests/test_hugepages.py tests/test_dpdk.py
+    [[ "${DATAPLANE:-linux-vxlan}" == "pulsaros-dpdk" ]] || \
+      die "dpdk-smoke requires DATAPLANE=pulsaros-dpdk"
+    run_pytest dpdk-smoke tests/test_hugepages.py tests/test_dpdk_vxlan.py
     ;;
-  topology-checks|linux-vxlan-reference)
-    run_pytest topology-checks tests/test_kernel.py tests/test_topology_checks.py
-    ;;
-  dpdk-vxlan-reference)
-    run_pytest dpdk-vxlan-reference tests/test_kernel.py tests/test_hugepages.py tests/test_dpdk_vxlan.py tests/test_topology_checks.py
+  topology-checks|vxlan-reference)
+    if [[ "${DATAPLANE:-linux-vxlan}" == "pulsaros-dpdk" ]]; then
+      run_pytest topology-checks tests/test_kernel.py tests/test_hugepages.py tests/test_dpdk_vxlan.py tests/test_topology_checks.py
+    else
+      run_pytest topology-checks tests/test_kernel.py tests/test_linux_vxlan.py tests/test_topology_checks.py
+    fi
     ;;
   full)
     run_pytest kernel-smoke tests/test_kernel.py
-    run_pytest dpdk-smoke tests/test_hugepages.py tests/test_dpdk.py
+    if [[ "${DATAPLANE:-linux-vxlan}" == "pulsaros-dpdk" ]]; then
+      run_pytest dataplane-health tests/test_hugepages.py tests/test_dpdk_vxlan.py
+    else
+      run_pytest dataplane-health tests/test_linux_vxlan.py
+    fi
     run_pytest topology-checks tests/test_topology_checks.py
     run_pytest fault-injection tests/test_fault_injection.py
     ;;

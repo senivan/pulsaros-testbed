@@ -27,6 +27,7 @@ def test_custom_kernel_marker_when_requested(topology, ssh_user, ssh_key):
 def test_custom_kernel_dpdk_profile_when_requested(topology, ssh_user, ssh_key):
     expected = os.environ.get("KERNEL_EXPECTED_RELEASE", "")
     profile = os.environ.get("KERNEL_DPDK_PROFILE", "none")
+    dataplane = os.environ.get("DATAPLANE", "linux-vxlan")
     if not expected or profile == "none":
         return
 
@@ -71,7 +72,7 @@ def test_custom_kernel_dpdk_profile_when_requested(topology, ssh_user, ssh_key):
     for host in all_hosts(topology):
         result = ssh(topology, ssh_user, ssh_key, host, "cat /proc/cmdline")
         cmdline_args = set(result.stdout.strip().split())
-        if host in vteps:
+        if dataplane == "pulsaros-dpdk" and host in vteps:
             missing = profile_args - cmdline_args
             assert not missing, f"{host} missing {profile} kernel args: {sorted(missing)}"
         else:

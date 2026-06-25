@@ -17,6 +17,7 @@
       libpcap-devel \
       make \
       numactl-devel \
+      pciutils \
       pkgconf-pkg-config
   args:
     executable: /bin/bash
@@ -65,7 +66,7 @@
     dest: /tmp/pulsaros-testbed-topology.json
     mode: "0644"
 
-- name: Render PulsarOS VXLAN per-host config
+- name: Bind PulsarOS VXLAN dataplane PCI functions to UIO
   ansible.builtin.shell: |
     set -euo pipefail
     python3 - <<'PY'
@@ -76,32 +77,129 @@
 
     host_name = os.environ["TOPOLOGY_HOST"]
     topology = json.loads(Path("/tmp/pulsaros-testbed-topology.json").read_text())
-    segments = topology.get("segments", {})
+    host = topology["hosts"][host_name]
+    management_macs = {
+        nic["mac"].lower() for nic in host["nics"] if nic.get("management")
+    }
 
-    def run(*args, check=True):
-        subprocess.run(args, check=check)
+    targets = {}
+    for segment in topology.get("segments", {}).values():
+        local = next(
+            (vtep for vtep in segment.get("vteps", []) if vtep["host"] == host_name),
+            None,
+        )
+        if not local:
+            continue
+        targets.setdefault(
+            local["underlay_mac"].lower(),
+            {"name": f"underlay-{local['underlay_nic']}", "role": "underlay"},
+        )
+        for nic in local.get("local_nics", []):
+            targets.setdefault(
+                nic["mac"].lower(),
+                {"name": f"access-{nic['name']}", "role": "access"},
+            )
 
-    def sh(command, check=True):
-        subprocess.run(["/bin/bash", "-lc", command], check=check)
+    if not targets:
+        raise SystemExit(f"no dataplane PCI targets found for {host_name}")
+    if management_macs & set(targets):
+        raise SystemExit("management NIC was selected as a DPDK dataplane target")
 
     def iface_by_mac(mac):
-        wanted = mac.lower()
         for path in Path("/sys/class/net").iterdir():
-            if "." in path.name:
-                continue
             try:
-                if (path / "address").read_text().strip().lower() == wanted:
-                    return path.name
+                if (path / "address").read_text().strip().lower() == mac:
+                    return path
             except FileNotFoundError:
                 continue
-        raise SystemExit(f"interface with MAC {mac} not found on {host_name}")
+        return None
 
-    def disable_nm(dev):
-        sh(f"command -v nmcli >/dev/null 2>&1 && nmcli device set {dev!r} managed no || true")
+    def pci_parent(iface):
+        device = (iface / "device").resolve()
+        for candidate in (device, *device.parents):
+            if (Path("/sys/bus/pci/devices") / candidate.name).exists():
+                return candidate.name
+        raise SystemExit(f"{iface.name} has no PCI parent")
 
-    def set_up(dev):
-        disable_nm(dev)
-        run("ip", "link", "set", dev, "up")
+    existing_path = Path("/etc/pulsaros/vxlan/pci-map.json")
+    if existing_path.exists():
+        existing = {
+            port["mac"].lower(): port
+            for port in json.loads(existing_path.read_text()).get("ports", [])
+        }
+    else:
+        existing = {}
+
+    mappings = []
+    for mac, target in targets.items():
+        iface = iface_by_mac(mac)
+        if iface is None:
+            saved = existing.get(mac)
+            if not saved:
+                raise SystemExit(f"kernel netdev or saved PCI mapping for {mac} was not found")
+            bdf = saved["pci"]
+            iface_name = saved["iface"]
+            kernel_bound = False
+        else:
+            bdf = pci_parent(iface)
+            iface_name = iface.name
+            kernel_bound = True
+        if not (Path("/sys/bus/pci/devices") / bdf).exists():
+            raise SystemExit(f"dataplane port does not resolve to a PCI function: {bdf}")
+        mappings.append({
+            **target, "mac": mac, "iface": iface_name, "pci": bdf,
+            "kernel_bound": kernel_bound,
+        })
+
+    subprocess.run(["modprobe", "uio_pci_generic"], check=True)
+    for mapping in mappings:
+        iface = mapping["iface"]
+        bdf = mapping["pci"]
+        if mapping["kernel_bound"]:
+            subprocess.run(["ip", "link", "set", iface, "nomaster"], check=False)
+            subprocess.run(["ip", "addr", "flush", "dev", iface], check=True)
+            subprocess.run(["ip", "link", "set", iface, "down"], check=True)
+        device = Path("/sys/bus/pci/devices") / bdf
+        driver_link = device / "driver"
+        current = driver_link.resolve().name if driver_link.exists() else None
+        if current != "uio_pci_generic":
+            (device / "driver_override").write_text("uio_pci_generic\n")
+            if driver_link.exists():
+                (driver_link.resolve() / "unbind").write_text(f"{bdf}\n")
+            Path("/sys/bus/pci/drivers_probe").write_text(f"{bdf}\n")
+        current = driver_link.resolve().name if driver_link.exists() else None
+        if current != "uio_pci_generic":
+            raise SystemExit(f"failed to bind {bdf} ({mapping['name']}) to uio_pci_generic")
+
+    output = Path("/etc/pulsaros/vxlan/pci-map.json")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    persisted = [
+        {key: value for key, value in mapping.items() if key != "kernel_bound"}
+        for mapping in mappings
+    ]
+    output.write_text(json.dumps({"ports": persisted}, indent=2, sort_keys=True) + "\n")
+    PY
+  args:
+    executable: /bin/bash
+  environment:
+    TOPOLOGY_HOST: "{{ inventory_hostname }}"
+  changed_when: true
+  when: (pulsaros_vxlan_runtime | default('smoke')) == 'service'
+
+- name: Render PulsarOS VXLAN per-host config
+  ansible.builtin.shell: |
+    set -euo pipefail
+    python3 - <<'PY'
+    import json
+    import os
+    from pathlib import Path
+
+    host_name = os.environ["TOPOLOGY_HOST"]
+    topology = json.loads(Path("/tmp/pulsaros-testbed-topology.json").read_text())
+    segments = topology.get("segments", {})
+
+    pci_map = json.loads(Path("/etc/pulsaros/vxlan/pci-map.json").read_text())
+    pci_by_mac = {port["mac"].lower(): port["pci"] for port in pci_map["ports"]}
 
     ports = []
     vxlan_segments = []
@@ -125,30 +223,32 @@
         if not local:
             continue
 
-        underlay_if = iface_by_mac(local["underlay_mac"])
-        set_up(underlay_if)
+        underlay_pci = pci_by_mac.get(local["underlay_mac"].lower())
+        if not underlay_pci:
+            raise SystemExit(f"missing PCI mapping for {local['underlay_mac']}")
         underlay_port = f"underlay-{local['underlay_nic']}"
         add_port(
             {
                 "name": underlay_port,
                 "role": "underlay",
-                "pmd": "af_packet",
-                "iface": underlay_if,
+                "pmd": "phys",
+                "pci": underlay_pci,
                 "ip": local["underlay_ip"],
             }
         )
 
         access_ports = []
         for nic in local.get("local_nics", []):
-            dev = iface_by_mac(nic["mac"])
-            set_up(dev)
+            pci = pci_by_mac.get(nic["mac"].lower())
+            if not pci:
+                raise SystemExit(f"missing PCI mapping for {nic['mac']}")
             access_port = f"access-{nic['name']}"
             add_port(
                 {
                     "name": access_port,
                     "role": "access",
-                    "pmd": "af_packet",
-                    "iface": dev,
+                    "pmd": "phys",
+                    "pci": pci,
                 }
             )
             access_ports.append(access_port)

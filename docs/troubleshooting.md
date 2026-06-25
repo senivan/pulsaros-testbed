@@ -13,7 +13,7 @@ sudo dnf install -y python3-pyyaml
 Also check that the selected topology exists:
 
 ```bash
-test -f "topologies/${TOPOLOGY:-linux-vxlan-reference}.yml"
+test -f "topologies/${TOPOLOGY:-vxlan-reference}.yml"
 ```
 
 In QinQ mode, preflight must be able to read Proxmox SDN state:

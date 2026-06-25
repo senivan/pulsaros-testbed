@@ -37,8 +37,8 @@
     topology = json.loads(Path("/tmp/pulsaros-testbed-topology.json").read_text())
     segments = topology.get("segments", {})
     control_plane = topology.get("control_plane", {"type": "static"})
-    dataplane_mode = os.environ.get("VXLAN_DATAPLAN_MODE", "linux")
-    if dataplane_mode not in {"linux", "dpdk"}:
+    dataplane_mode = os.environ.get("VXLAN_DATAPLAN_MODE", "linux-vxlan")
+    if dataplane_mode not in {"linux-vxlan", "pulsaros-dpdk"}:
         raise SystemExit(f"unsupported VXLAN dataplane mode: {dataplane_mode}")
 
     def run(*args, check=True):
@@ -75,6 +75,26 @@
             stderr=subprocess.DEVNULL,
             check=False,
         ).returncode == 0
+
+    def restore_kernel_dataplane_ports():
+        mapping_path = Path("/etc/pulsaros/vxlan/pci-map.json")
+        if dataplane_mode != "linux-vxlan" or not mapping_path.exists():
+            return
+        mapping = json.loads(mapping_path.read_text())
+        for port in mapping.get("ports", []):
+            bdf = port["pci"]
+            device = Path("/sys/bus/pci/devices") / bdf
+            if not device.exists():
+                raise SystemExit(f"saved dataplane PCI function is missing: {bdf}")
+            driver_link = device / "driver"
+            current = driver_link.resolve().name if driver_link.exists() else None
+            if current == "virtio-pci":
+                continue
+            (device / "driver_override").write_text("virtio-pci\n")
+            if driver_link.exists():
+                (driver_link.resolve() / "unbind").write_text(f"{bdf}\n")
+            Path("/sys/bus/pci/drivers_probe").write_text(f"{bdf}\n")
+        run("udevadm", "settle")
 
     def prepare_access_interface(dev, cidr):
         disable_nm(dev)
@@ -121,7 +141,7 @@
             vxlan = segment["vxlan"]
 
             disable_nm(underlay_if)
-            if dataplane_mode == "dpdk":
+            if dataplane_mode == "pulsaros-dpdk":
                 delete_link(vxlan)
                 delete_link(bridge)
                 sh(f"ip link set {underlay_if!r} nomaster 2>/dev/null || true")
@@ -191,6 +211,7 @@
                     )
             sh(f"bridge fdb show dev {vxlan!r}")
 
+    restore_kernel_dataplane_ports()
     configure_clients()
     configure_vteps()
     PY
@@ -198,5 +219,5 @@
     executable: /bin/bash
   environment:
     TOPOLOGY_HOST: "{{ inventory_hostname }}"
-    VXLAN_DATAPLAN_MODE: "{{ vxlan_dataplane_mode | default('linux') }}"
+    VXLAN_DATAPLAN_MODE: "{{ vxlan_dataplane_mode | default('linux-vxlan') }}"
   changed_when: true

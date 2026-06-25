@@ -44,6 +44,13 @@ case "$NETWORK_MODE" in
 esac
 export NETWORK_MODE
 
+DATAPLANE="${DATAPLANE:-linux-vxlan}"
+case "$DATAPLANE" in
+  linux-vxlan|pulsaros-dpdk) ;;
+  *) die "DATAPLANE must be linux-vxlan or pulsaros-dpdk, got: $DATAPLANE" ;;
+esac
+export DATAPLANE
+
 KERNEL_DPDK_PROFILE="${KERNEL_DPDK_PROFILE:-none}"
 case "$KERNEL_DPDK_PROFILE" in
   dpdk-vm|dpdk-small|dpdk-bench|none) ;;
@@ -60,7 +67,7 @@ else
   export QINQ_IPAM="${QINQ_IPAM:-pve}"
 fi
 
-TOPOLOGY="${TOPOLOGY:-linux-vxlan-reference}"
+TOPOLOGY="${TOPOLOGY:-vxlan-reference}"
 TOPOLOGY_FILE="${TOPOLOGY_FILE:-topologies/${TOPOLOGY}.yml}"
 [[ -f "$TOPOLOGY_FILE" ]] || die "topology file not found: $TOPOLOGY_FILE"
 
@@ -145,6 +152,10 @@ clone_vm() {
 configure_vm_profile_shape() {
   local host="$1" vmid="$2"
   local is_vtep
+
+  if [[ "$DATAPLANE" != "pulsaros-dpdk" ]]; then
+    return 0
+  fi
 
   case "$KERNEL_DPDK_PROFILE" in
     dpdk-vm)

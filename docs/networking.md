@@ -77,7 +77,7 @@ VM NICs attach to `TEST_BRIDGE` with Proxmox `tag=<vlan>`.
 
 ## Default NIC Layout
 
-The default `linux-vxlan-reference` topology declares this NIC layout:
+The default `vxlan-reference` topology declares this NIC layout:
 
 ```text
 client-a:

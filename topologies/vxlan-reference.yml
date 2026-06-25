@@ -1,6 +1,6 @@
 schema_version: 1
-name: linux-vxlan-reference
-description: Four-VM Linux VXLAN EVPN reference topology.
+name: vxlan-reference
+description: Four-VM VXLAN reference topology.
 
 networks:
   left-l2:
@@ -129,55 +129,10 @@ control_plane:
   asn: 65000
   peering: full_mesh
 
-plays:
-  - name: Disable shell OSC context output
-    hosts: all
-    become: true
-    gather_facts: false
-    tasks:
-      - name: Disable systemd OSC context shell profile
-        ansible.builtin.raw: |
-          for path in \
-            /etc/profile.d/80-systemd-osc-context.sh \
-            /usr/lib/systemd/profile.d/80-systemd-osc-context.sh; do
-            if [ -e "$path" ]; then
-              mv "$path" "$path.pulsaros-disabled"
-            fi
-          done
-        changed_when: false
-  - name: Provision all testbed VMs
-    hosts: all
-    become: true
-    roles:
-      - common
-      - kernel
-  - name: Provision VTEP dataplane prerequisites
-    hosts: vteps
-    become: true
-    roles:
-      - hugepages
-      - dpdk
-      - pulsaros-vxlan
-  - name: Provision client traffic generator prerequisites
-    hosts: clients
-    become: true
-    roles:
-      - hugepages
-      - traffic-tools
-  - name: Configure Linux VXLAN EVPN reference topology
-    hosts: all
-    become: true
-    roles:
-      - vxlan-test
-  - name: Configure FRR EVPN control plane
-    hosts: vteps
-    become: true
-    roles:
-      - frr-evpn
-
 checks:
   - name: evpn-control-plane
     type: evpn_control_plane
+    dataplanes: [linux-vxlan]
     timeout: 60
 
   - name: overlay-ping

@@ -2,6 +2,7 @@ import json
 import ipaddress
 import pathlib
 import shlex
+import subprocess
 import time
 
 import pytest
@@ -242,6 +243,38 @@ def _inject_vlan_mismatch(topology, ssh_user, ssh_key, fault, source):
 
 def _inject_bounce_vtep_underlay(topology, ssh_user, ssh_key, segment, source):
     source_vtep = _attached_vtep(topology, segment, source)
+    resolved = topology["__resolved__"]
+    if resolved.get("dataplane", {}).get("type") == "pulsaros-dpdk":
+        host = resolved["hosts"][source_vtep["host"]]
+        nic_index = next(
+            index for index, candidate in enumerate(host["nics"])
+            if candidate["name"] == source_vtep["underlay_nic"]
+        )
+        key = f"net{nic_index}"
+        config = subprocess.run(
+            ["sudo", "-n", "qm", "config", str(host["vmid"])],
+            text=True,
+            capture_output=True,
+            check=True,
+        ).stdout
+        original = next(
+            line.split(":", 1)[1].strip() for line in config.splitlines()
+            if line.startswith(f"{key}:")
+        )
+        down = original if "link_down=1" in original else f"{original},link_down=1"
+        subprocess.run(
+            ["sudo", "-n", "qm", "set", str(host["vmid"]), f"--{key}", down],
+            check=True,
+        )
+
+        def restore():
+            return subprocess.run(
+                ["sudo", "-n", "qm", "set", str(host["vmid"]), f"--{key}", original],
+                check=False,
+            )
+
+        return restore
+
     nic = host_nic(topology, source_vtep["host"], source_vtep["underlay_nic"])
     underlay = iface_by_mac(topology, ssh_user, ssh_key, source_vtep["host"], nic["mac"])
     _sudo(

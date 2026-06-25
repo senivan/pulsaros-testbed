@@ -26,9 +26,10 @@
   hosts: vteps
   become: true
   roles:
-    - hugepages
-    - dpdk
-    - pulsaros-vxlan
+    - role: hugepages
+      when: lookup('ansible.builtin.env', 'DATAPLANE') == 'pulsaros-dpdk'
+    - role: dpdk
+      when: lookup('ansible.builtin.env', 'DATAPLANE') == 'pulsaros-dpdk'
 
 - name: Provision client traffic generator prerequisites
   hosts: clients
@@ -37,14 +38,28 @@
     - hugepages
     - traffic-tools
 
-- name: Configure Linux VXLAN EVPN reference topology
+- name: Configure topology endpoints and selected VXLAN dataplane
   hosts: all
   become: true
+  vars:
+    vxlan_dataplane_mode: "{{ lookup('ansible.builtin.env', 'DATAPLANE') | default('linux-vxlan', true) }}"
   roles:
     - vxlan-test
+
+- name: Deploy PulsarOS DPDK VXLAN dataplane
+  hosts: vteps
+  become: true
+  vars:
+    pulsaros_vxlan_runtime: service
+  roles:
+    - role: pulsaros-vxlan
+      when: lookup('ansible.builtin.env', 'DATAPLANE') == 'pulsaros-dpdk'
 
 - name: Configure FRR EVPN control plane
   hosts: vteps
   become: true
   roles:
-    - frr-evpn
+    - role: frr-evpn
+      when:
+        - lookup('ansible.builtin.env', 'DATAPLANE') == 'linux-vxlan'
+        - vxlan_control_plane_type == 'evpn'
