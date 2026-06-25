@@ -313,6 +313,7 @@
   environment:
     KERNEL_ROOT_FSTYPE: "{{ kernel_root_fstype.stdout }}"
     KERNEL_WORKING_ARGS: "{{ kernel_working_args.stdout }}"
+    KERNEL_DPDK_PROFILE: "{{ kernel_dpdk_profile }}"
   when: kernel_source != 'none'
 
 - name: Trigger reboot into custom kernel
