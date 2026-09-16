@@ -527,7 +527,7 @@ def _raise_capture_outcomes(trigger_error, capture_error):
         raise trigger_error
 
 
-def _run_packet_capture_check(topology, ssh_user, ssh_key, check):
+def _run_packet_capture_check(topology, ssh_user, ssh_key, check, run_trigger=None):
     captures = []
     trigger_error = None
     try:
@@ -536,7 +536,10 @@ def _run_packet_capture_check(topology, ssh_user, ssh_key, check):
             for capture in check["captures"]
         ]
         time.sleep(_check_value(check, "settle", 2))
-        _run_ping_check(topology, ssh_user, ssh_key, check["trigger"])
+        if run_trigger is None:
+            _run_ping_check(topology, ssh_user, ssh_key, check["trigger"])
+        else:
+            run_trigger()
         time.sleep(_check_value(check, "post_trigger_wait", 3))
     except BaseException as error:
         trigger_error = error

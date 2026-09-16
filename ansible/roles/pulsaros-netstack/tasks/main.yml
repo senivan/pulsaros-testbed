@@ -1,4 +1,8 @@
 ---
+- name: Select netstack application for this scenario
+  ansible.builtin.set_fact:
+    pulsaros_netstack_udp_echo: "{{ lookup('ansible.builtin.env', 'SCENARIO') == 'netstack-udp-smoke' }}"
+
 - name: Validate PulsarOS netstack variables
   ansible.builtin.assert:
     that:
@@ -44,6 +48,16 @@
     ln -sfn /usr/local/libexec/pulsaros/netstack/netstack-dp /usr/local/bin/pulsaros-netstack-dp
   args:
     executable: /bin/bash
+  changed_when: true
+
+- name: Build and install native UDP echo application
+  ansible.builtin.shell: |
+    set -euo pipefail
+    cmake --build /opt/pulsaros/netstack/build --target udp-echo
+    install -m 0755 /opt/pulsaros/netstack/build/udp-echo /usr/local/libexec/pulsaros/netstack/udp-echo
+  args:
+    executable: /bin/bash
+  when: pulsaros_netstack_udp_echo | bool
   changed_when: true
 
 - name: Bind netstack dataplane PCI function to UIO
@@ -174,7 +188,7 @@
 
       [Service]
       Type=simple
-      ExecStart=/usr/bin/stdbuf -oL -eL /usr/local/libexec/pulsaros/netstack/netstack-dp /etc/pulsaros/netstack/netstack.conf
+      ExecStart=/usr/bin/stdbuf -oL -eL /usr/local/libexec/pulsaros/netstack/{{ 'udp-echo' if pulsaros_netstack_udp_echo | bool else 'netstack-dp' }} /etc/pulsaros/netstack/netstack.conf
       Restart=on-failure
       RestartSec=2
       LimitMEMLOCK=infinity

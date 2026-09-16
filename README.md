@@ -394,6 +394,16 @@ make destroy
 milestone validates ARP/IPv4/ICMP behavior over virtual virtio/UIO devices. It
 does not measure physical-NIC throughput or dataplane performance.
 
+For the native UDP milestone, use the same topology and commands with
+`SCENARIO=netstack-udp-smoke` and a `PULSAROS_NETSTACK_REF` that includes the
+`udp-echo` target. This scenario installs that application as the existing
+netstack service, runs the health and ICMP checks, then uses a Python UDP socket
+on `client-a` to assert the exact `hello-netstack` reply from `192.0.2.2:9000`.
+It flushes the client's neighbour entry before capture and requires ARP plus
+UDP traffic in both directions. The socket result, pcap, decoded trace and
+JUnit result are collected with the existing artifacts. Shutdown and cleanup
+use the normal lifecycle. `netstack-smoke` continues to use `netstack-dp`.
+
 ## Local Reproduction
 
 Create a local environment:

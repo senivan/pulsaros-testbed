@@ -76,6 +76,30 @@ def test_parse_ping_metrics_extracts_loss_and_rtt():
     assert metrics["rtt_avg_ms"] == 0.393
 
 
+@pytest.mark.parametrize("fail_trigger", [False, True])
+def test_custom_capture_trigger_preserves_collection(monkeypatch, fail_trigger):
+    module = load_module()
+    events = []
+    monkeypatch.setattr(module.time, "sleep", lambda _: None)
+    monkeypatch.setattr(module, "_start_capture", lambda *args: {"host": "client-a"})
+    monkeypatch.setattr(module, "_stop_capture", lambda *args: events.append("stop"))
+    monkeypatch.setattr(module, "_collect_capture", lambda *args: events.append("collect"))
+    monkeypatch.setattr(module, "_assert_captures", lambda *args: events.append("assert"))
+
+    def trigger():
+        events.append("trigger")
+        if fail_trigger:
+            raise RuntimeError("UDP timeout")
+
+    check = {"name": "udp", "captures": [{}]}
+    if fail_trigger:
+        with pytest.raises(RuntimeError, match="UDP timeout"):
+            module._run_packet_capture_check({}, "user", "key", check, run_trigger=trigger)
+    else:
+        module._run_packet_capture_check({}, "user", "key", check, run_trigger=trigger)
+    assert events == ["trigger", "stop", "collect", "assert"]
+
+
 def test_metric_warnings_are_report_only_strings():
     module = load_module()
     warnings = module._metric_warnings(

@@ -41,11 +41,14 @@ case "$SCENARIO" in
       die "dpdk-smoke requires DATAPLANE=pulsaros-dpdk"
     run_pytest dpdk-smoke tests/test_hugepages.py tests/test_dpdk_vxlan.py
     ;;
-  netstack-smoke)
+  netstack-smoke|netstack-udp-smoke)
     [[ "${DATAPLANE:-linux-vxlan}" == "pulsaros-netstack" ]] || \
-      die "netstack-smoke requires DATAPLANE=pulsaros-netstack"
+      die "$SCENARIO requires DATAPLANE=pulsaros-netstack"
     run_pytest netstack-health tests/test_kernel.py tests/test_hugepages.py tests/test_netstack.py
     run_pytest netstack-topology tests/test_topology_checks.py
+    if [[ "$SCENARIO" == "netstack-udp-smoke" ]]; then
+      run_pytest netstack-udp tests/test_netstack_udp.py
+    fi
     PULSAROS_NETSTACK_SHUTDOWN=1 run_pytest \
       netstack-shutdown tests/test_netstack.py::test_netstack_service_stops_cleanly
     ;;
