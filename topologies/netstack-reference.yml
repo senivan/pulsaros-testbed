@@ -1,0 +1,115 @@
+schema_version: 1
+name: netstack-reference
+description: Two-VM PulsarOS netstack endpoint topology.
+
+networks:
+  netstack-lan:
+    mode: access
+    vnet_prefix: pn
+    inner_vlan: 110
+    legacy_vlan_offset: 10
+
+hosts:
+  client-a:
+    vmid_offset: 1
+    groups:
+      - clients
+    nics:
+      - name: mgmt
+        network: management
+        mac_offset: 1
+        management: true
+      - name: data
+        network: netstack-lan
+        mac_offset: 11
+    ansible_vars:
+      dataplane_mac: "@nic:data.mac"
+      management_mac: "@nic:mgmt.mac"
+      dataplane_ip: 192.0.2.1/24
+      peer_ip: 192.0.2.2
+
+  netstack-a:
+    vmid_offset: 2
+    groups:
+      - netstacks
+    nics:
+      - name: mgmt
+        network: management
+        mac_offset: 2
+        management: true
+      - name: data
+        network: netstack-lan
+        mac_offset: 12
+    ansible_vars:
+      dataplane_mac: "@nic:data.mac"
+      management_mac: "@nic:mgmt.mac"
+      netstack_ip: 192.0.2.2/24
+
+plays:
+  - name: Disable shell OSC context output
+    hosts: all
+    become: true
+    gather_facts: false
+    tasks:
+      - name: Disable systemd OSC context shell profile
+        ansible.builtin.raw: |
+          for path in \
+            /etc/profile.d/80-systemd-osc-context.sh \
+            /usr/lib/systemd/profile.d/80-systemd-osc-context.sh; do
+            if [ -e "$path" ]; then
+              mv "$path" "$path.pulsaros-disabled"
+            fi
+          done
+        changed_when: false
+
+  - name: Provision netstack testbed VMs
+    hosts: all
+    become: true
+    roles:
+      - common
+      - kernel
+
+  - name: Configure Linux netstack client
+    hosts: clients
+    become: true
+    roles:
+      - traffic-tools
+      - netstack-client
+
+  - name: Deploy PulsarOS netstack endpoint
+    hosts: netstacks
+    become: true
+    roles:
+      - hugepages
+      - dpdk
+      - pulsaros-netstack
+
+checks:
+  - name: netstack-ping
+    type: ping
+    dataplanes: [pulsaros-netstack]
+    source: client-a
+    destination: 192.0.2.2
+    count: 3
+    wait: 2
+    timeout: 30
+
+  - name: netstack-icmp-capture
+    type: packet_capture
+    dataplanes: [pulsaros-netstack]
+    captures:
+      - host: client-a
+        nic: data
+        filter: icmp
+    trigger:
+      type: ping
+      source: client-a
+      destination: 192.0.2.2
+      count: 3
+      wait: 2
+      timeout: 30
+    assertions:
+      min_packets: 2
+      contains:
+        - ICMP echo request
+        - ICMP echo reply

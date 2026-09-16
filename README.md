@@ -358,6 +358,42 @@ pulsaros_vxlan_repo=https://github.com/senivan/PulsarOS-vxlan.git
 pulsaros_vxlan_ref=main
 ```
 
+## PulsarOS Netstack Functional Baseline
+
+`topologies/netstack-reference.yml` creates a Linux client and one PulsarOS
+netstack endpoint on an isolated dataplane network. The netstack VM keeps its
+management NIC under Linux control and binds only its dataplane virtio PCI
+function to `uio_pci_generic`.
+
+The `netstack-smoke` scenario builds the selected PulsarOS-netstack revision in
+the VM, starts it through systemd, verifies its generated configuration and PCI
+ownership, and drives ARP plus ICMP from `client-a`. The generic topology-check
+executor collects an ICMP pcap and requires both echo requests and replies.
+
+Run it locally from the Proxmox testbed runner:
+
+```bash
+export RUN_ID="$(date +%s)"
+export TOPOLOGY=netstack-reference
+export DATAPLANE=pulsaros-netstack
+export SCENARIO=netstack-smoke
+export PULSAROS_NETSTACK_REPO=https://github.com/senivan/PulsarOS-netstack.git
+export PULSAROS_NETSTACK_REF=main
+
+make preflight
+make create
+make wait-ssh
+make inventory
+make provision
+make scenario
+make logs
+make destroy
+```
+
+`PULSAROS_NETSTACK_REF` may name a feature branch for pre-merge validation. This
+milestone validates ARP/IPv4/ICMP behavior over virtual virtio/UIO devices. It
+does not measure physical-NIC throughput or dataplane performance.
+
 ## Local Reproduction
 
 Create a local environment:

@@ -38,6 +38,11 @@
     segments = topology.get("segments", {})
     control_plane = topology.get("control_plane", {"type": "static"})
     dataplane_mode = os.environ.get("VXLAN_DATAPLAN_MODE", "linux-vxlan")
+    if dataplane_mode == "pulsaros-netstack":
+        raise SystemExit(
+            "pulsaros-netstack requires topology-specific plays; "
+            "the VXLAN endpoint role must not configure it"
+        )
     if dataplane_mode not in {"linux-vxlan", "pulsaros-dpdk"}:
         raise SystemExit(f"unsupported VXLAN dataplane mode: {dataplane_mode}")
 

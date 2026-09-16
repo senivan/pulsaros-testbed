@@ -9,6 +9,7 @@ import pytest
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 MODULE_PATH = ROOT / "scripts" / "render-topology.py"
 TOPOLOGY = ROOT / "topologies" / "vxlan-reference.yml"
+NETSTACK_TOPOLOGY = ROOT / "topologies" / "netstack-reference.yml"
 MULTI_VTEP_TOPOLOGY = ROOT / "topologies" / "vxlan-3vtep-3lan.yml"
 FOUR_VTEP_FULLMESH_TOPOLOGY = ROOT / "topologies" / "vxlan-4vtep-fullmesh.yml"
 FOUR_VTEP_DUAL_RR_TOPOLOGY = ROOT / "topologies" / "vxlan-4vtep-dual-rr.yml"
@@ -104,6 +105,80 @@ def test_dpdk_vxlan_topology_renders_static_service(monkeypatch):
     assert data["segments"]["default-lan"]["vni"] == 100
     assert all(check["type"] != "evpn_control_plane" for check in data["checks"])
     assert data["plays"] == []
+
+
+def test_netstack_topology_renders_endpoint_hosts_and_checks(monkeypatch):
+    base_env(monkeypatch)
+
+    data = render_topology.render(NETSTACK_TOPOLOGY, dataplane="pulsaros-netstack")
+
+    assert data["name"] == "netstack-reference"
+    assert data["dataplane"] == {"type": "pulsaros-netstack"}
+    assert data["segments"] == {}
+    assert data["control_plane"] == {"type": "static"}
+    assert set(data["hosts"]) == {"client-a", "netstack-a"}
+    assert data["hosts"]["client-a"]["groups"] == ["clients"]
+    assert data["hosts"]["netstack-a"]["groups"] == ["netstacks"]
+    assert [check["name"] for check in data["checks"]] == [
+        "netstack-ping",
+        "netstack-icmp-capture",
+    ]
+    assert data["checks"][1]["captures"][0]["nic"] == "data"
+    assert data["checks"][1]["assertions"]["contains"] == [
+        "ICMP echo request",
+        "ICMP echo reply",
+    ]
+    assert len(data["plays"]) == 4
+    assert data["plays"][-1]["hosts"] == "netstacks"
+    assert data["plays"][-1]["roles"][-1] == "pulsaros-netstack"
+
+
+def test_netstack_topology_resolves_tokens_and_inventory_groups(monkeypatch, tmp_path):
+    base_env(monkeypatch)
+    data = render_topology.render(NETSTACK_TOPOLOGY, dataplane="pulsaros-netstack")
+    data["hosts"]["client-a"]["management_ip"] = "198.51.100.11"
+    data["hosts"]["netstack-a"]["management_ip"] = "198.51.100.12"
+
+    client = data["hosts"]["client-a"]
+    netstack = data["hosts"]["netstack-a"]
+    assert render_topology.resolve_token(
+        data, client, client["ansible_vars"]["dataplane_mac"]
+    ) == client["nics"][1]["mac"]
+    assert render_topology.resolve_token(
+        data, netstack, netstack["ansible_vars"]["management_mac"]
+    ) == netstack["nics"][0]["mac"]
+    assert client["ansible_vars"]["dataplane_ip"] == "192.0.2.1/24"
+    assert client["ansible_vars"]["peer_ip"] == "192.0.2.2"
+    assert netstack["ansible_vars"]["netstack_ip"] == "192.0.2.2/24"
+
+    inventory = tmp_path / "inventory.ini"
+    monkeypatch.setattr(render_topology, "INVENTORY", inventory)
+    render_topology.write_inventory(data)
+    rendered = inventory.read_text()
+    assert "[clients]\nclient-a " in rendered
+    assert "[netstacks]\nnetstack-a " in rendered
+    assert f"dataplane_mac={client['nics'][1]['mac']}" in rendered
+    assert f"management_mac={netstack['nics'][0]['mac']}" in rendered
+
+
+def test_netstack_topology_filters_checks_for_other_dataplanes(monkeypatch, tmp_path):
+    base_env(monkeypatch)
+    source = render_topology.load_yaml(NETSTACK_TOPOLOGY)
+    source["checks"].append(
+        {
+            "name": "linux-only-check",
+            "type": "ping",
+            "dataplanes": ["linux-vxlan"],
+            "source": "client-a",
+            "destination": "192.0.2.2",
+        }
+    )
+    topology = tmp_path / "netstack.yml"
+    topology.write_text(render_topology.yaml.safe_dump(source, sort_keys=False))
+
+    data = render_topology.render(topology, dataplane="pulsaros-netstack")
+
+    assert "linux-only-check" not in {check["name"] for check in data["checks"]}
 
 
 def test_dpdk_multi_vtep_filters_evpn_only_checks_and_faults(monkeypatch):
