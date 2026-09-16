@@ -12,6 +12,7 @@ on:
           - kernel-smoke
           - dpdk-smoke
           - netstack-smoke
+          - netstack-udp-smoke
           - topology-checks
           - full
       topology:
