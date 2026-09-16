@@ -3,6 +3,8 @@ from pathlib import Path
 
 import pytest
 
+from conftest import dpdk_workload_hosts
+
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "tests" / "test_topology_checks.py"
@@ -94,3 +96,27 @@ def test_parse_pktgen_metrics_extracts_best_effort_stats():
     assert metrics["rx_packets"] == 1000
     assert metrics["tx_pps"] == 512.5
     assert metrics["tx_bytes"] == 65536
+
+
+@pytest.mark.parametrize(
+    ("dataplane", "group", "expected"),
+    [
+        ("linux-vxlan", None, ()),
+        ("pulsaros-dpdk", "vteps", ("vtep-a",)),
+        ("pulsaros-netstack", "netstacks", ("netstack-a",)),
+    ],
+)
+def test_dpdk_workload_hosts_selects_only_dataplane_group(dataplane, group, expected):
+    hosts = {
+        "client-a": {"groups": ["clients"]},
+        "vtep-a": {"groups": ["vteps"]},
+        "netstack-a": {"groups": ["netstacks"]},
+    }
+    topology = {
+        "__resolved__": {"dataplane": {"type": dataplane}},
+        "__hosts__": hosts,
+    }
+
+    assert dpdk_workload_hosts(topology) == expected
+    if group:
+        assert all(group in hosts[host]["groups"] for host in expected)

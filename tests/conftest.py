@@ -80,6 +80,17 @@ def group_hosts(topology, group):
     return tuple(name for name, values in hosts.items() if group in values.get("groups", []))
 
 
+def dpdk_workload_hosts(topology):
+    dataplane = resolved_topology(topology).get("dataplane", {}).get(
+        "type", os.environ.get("DATAPLANE", "linux-vxlan")
+    )
+    if dataplane == "pulsaros-dpdk":
+        return group_hosts(topology, "vteps")
+    if dataplane == "pulsaros-netstack":
+        return group_hosts(topology, "netstacks")
+    return ()
+
+
 def host_ip(topology, host):
     if "__hosts__" in topology:
         return topology["__hosts__"][host]["management_ip"]

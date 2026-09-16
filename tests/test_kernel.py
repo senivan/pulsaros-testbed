@@ -1,7 +1,7 @@
 import os
 import re
 
-from conftest import all_hosts, group_hosts, ssh
+from conftest import all_hosts, dpdk_workload_hosts, ssh
 
 
 def test_all_vms_respond_to_ssh(topology, ssh_user, ssh_key):
@@ -64,15 +64,15 @@ def test_custom_kernel_dpdk_profile_when_requested(topology, ssh_user, ssh_key):
     }
     assert profile in expected_args
 
-    vteps = set(group_hosts(topology, "vteps"))
-    assert vteps, "topology has no VTEP hosts to validate DPDK kernel profile"
+    workload_hosts = set(dpdk_workload_hosts(topology))
+    assert workload_hosts, "topology has no DPDK workload hosts to validate kernel profile"
     profile_args = expected_args[profile]
     managed_args = set().union(*expected_args.values())
 
     for host in all_hosts(topology):
         result = ssh(topology, ssh_user, ssh_key, host, "cat /proc/cmdline")
         cmdline_args = set(result.stdout.strip().split())
-        if dataplane == "pulsaros-dpdk" and host in vteps:
+        if dataplane in ("pulsaros-dpdk", "pulsaros-netstack") and host in workload_hosts:
             missing = profile_args - cmdline_args
             assert not missing, f"{host} missing {profile} kernel args: {sorted(missing)}"
         else:

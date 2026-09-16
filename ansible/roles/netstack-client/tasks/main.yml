@@ -1,0 +1,67 @@
+---
+- name: Validate netstack client variables
+  ansible.builtin.assert:
+    that:
+      - dataplane_mac is defined
+      - management_mac is defined
+      - dataplane_ip is defined
+    fail_msg: "netstack-client requires dataplane_mac, management_mac, and dataplane_ip"
+
+- name: Resolve netstack client interfaces by MAC
+  ansible.builtin.shell: |
+    set -euo pipefail
+    find_iface() {
+      local wanted="$1" path
+      for path in /sys/class/net/*; do
+        if [ "$(cat "${path}/address" 2>/dev/null || true)" = "$wanted" ]; then
+          basename "$path"
+          return 0
+        fi
+      done
+      return 1
+    }
+    data_iface="$(find_iface "${DATAPLANE_MAC,,}")"
+    management_iface="$(find_iface "${MANAGEMENT_MAC,,}")"
+    if [ "$data_iface" = "$management_iface" ]; then
+      echo "dataplane interface resolves to the management NIC" >&2
+      exit 1
+    fi
+    printf '%s\n' "$data_iface"
+  args:
+    executable: /bin/bash
+  environment:
+    DATAPLANE_MAC: "{{ dataplane_mac }}"
+    MANAGEMENT_MAC: "{{ management_mac }}"
+  register: netstack_client_dataplane_iface
+  changed_when: false
+
+- name: Configure netstack client dataplane address
+  ansible.builtin.shell: |
+    set -euo pipefail
+    iface="${DATAPLANE_IFACE}"
+    command -v nmcli >/dev/null 2>&1 && nmcli device set "$iface" managed no || true
+    ip link set "$iface" nomaster 2>/dev/null || true
+    ip addr flush dev "$iface"
+    ip neigh flush dev "$iface" 2>/dev/null || true
+    ip addr replace "${DATAPLANE_IP}" dev "$iface"
+    ip link set "$iface" up
+  args:
+    executable: /bin/bash
+  environment:
+    DATAPLANE_IFACE: "{{ netstack_client_dataplane_iface.stdout }}"
+    DATAPLANE_IP: "{{ dataplane_ip }}"
+  changed_when: true
+
+- name: Verify netstack client dataplane address
+  ansible.builtin.command:
+    argv:
+      - ip
+      - -4
+      - -o
+      - address
+      - show
+      - dev
+      - "{{ netstack_client_dataplane_iface.stdout }}"
+  register: netstack_client_address
+  changed_when: false
+  failed_when: dataplane_ip not in netstack_client_address.stdout

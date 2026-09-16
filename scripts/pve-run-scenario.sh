@@ -41,22 +41,49 @@ case "$SCENARIO" in
       die "dpdk-smoke requires DATAPLANE=pulsaros-dpdk"
     run_pytest dpdk-smoke tests/test_hugepages.py tests/test_dpdk_vxlan.py
     ;;
+  netstack-smoke)
+    [[ "${DATAPLANE:-linux-vxlan}" == "pulsaros-netstack" ]] || \
+      die "netstack-smoke requires DATAPLANE=pulsaros-netstack"
+    run_pytest netstack-health tests/test_kernel.py tests/test_hugepages.py tests/test_netstack.py
+    run_pytest netstack-topology tests/test_topology_checks.py
+    PULSAROS_NETSTACK_SHUTDOWN=1 run_pytest \
+      netstack-shutdown tests/test_netstack.py::test_netstack_service_stops_cleanly
+    ;;
   topology-checks|vxlan-reference)
-    if [[ "${DATAPLANE:-linux-vxlan}" == "pulsaros-dpdk" ]]; then
-      run_pytest topology-checks tests/test_kernel.py tests/test_hugepages.py tests/test_dpdk_vxlan.py tests/test_topology_checks.py
-    else
-      run_pytest topology-checks tests/test_kernel.py tests/test_linux_vxlan.py tests/test_topology_checks.py
-    fi
+    case "${DATAPLANE:-linux-vxlan}" in
+      linux-vxlan)
+        run_pytest topology-checks tests/test_kernel.py tests/test_linux_vxlan.py tests/test_topology_checks.py
+        ;;
+      pulsaros-dpdk)
+        run_pytest topology-checks tests/test_kernel.py tests/test_hugepages.py tests/test_dpdk_vxlan.py tests/test_topology_checks.py
+        ;;
+      pulsaros-netstack)
+        run_pytest topology-checks tests/test_kernel.py tests/test_hugepages.py tests/test_netstack.py tests/test_topology_checks.py
+        ;;
+      *) die "unsupported DATAPLANE: ${DATAPLANE}" ;;
+    esac
     ;;
   full)
     run_pytest kernel-smoke tests/test_kernel.py
-    if [[ "${DATAPLANE:-linux-vxlan}" == "pulsaros-dpdk" ]]; then
-      run_pytest dataplane-health tests/test_hugepages.py tests/test_dpdk_vxlan.py
-    else
-      run_pytest dataplane-health tests/test_linux_vxlan.py
-    fi
-    run_pytest topology-checks tests/test_topology_checks.py
-    run_pytest fault-injection tests/test_fault_injection.py
+    case "${DATAPLANE:-linux-vxlan}" in
+      linux-vxlan)
+        run_pytest dataplane-health tests/test_linux_vxlan.py
+        run_pytest topology-checks tests/test_topology_checks.py
+        run_pytest fault-injection tests/test_fault_injection.py
+        ;;
+      pulsaros-dpdk)
+        run_pytest dataplane-health tests/test_hugepages.py tests/test_dpdk_vxlan.py
+        run_pytest topology-checks tests/test_topology_checks.py
+        run_pytest fault-injection tests/test_fault_injection.py
+        ;;
+      pulsaros-netstack)
+        run_pytest dataplane-health tests/test_hugepages.py tests/test_netstack.py
+        run_pytest topology-checks tests/test_topology_checks.py
+        PULSAROS_NETSTACK_SHUTDOWN=1 run_pytest \
+          netstack-shutdown tests/test_netstack.py::test_netstack_service_stops_cleanly
+        ;;
+      *) die "unsupported DATAPLANE: ${DATAPLANE}" ;;
+    esac
     ;;
   *)
     die "unsupported scenario: $SCENARIO"

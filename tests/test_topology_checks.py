@@ -315,7 +315,11 @@ def _decode_name(check_name, capture):
 def _start_capture(topology, ssh_user, ssh_key, check_name, capture):
     nic = host_nic(topology, capture["host"], capture["nic"])
     resolved = topology["__resolved__"]
-    if resolved.get("dataplane", {}).get("type") == "pulsaros-dpdk":
+    dataplane = resolved.get("dataplane", {}).get("type")
+    capture_host_groups = resolved.get("hosts", {}).get(capture["host"], {}).get("groups", [])
+    if dataplane == "pulsaros-dpdk" or (
+        dataplane == "pulsaros-netstack" and "netstacks" in capture_host_groups
+    ):
         host = resolved["hosts"][capture["host"]]
         nic_index = next(
             index for index, candidate in enumerate(host["nics"])

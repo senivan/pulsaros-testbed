@@ -46,8 +46,8 @@ export NETWORK_MODE
 
 DATAPLANE="${DATAPLANE:-linux-vxlan}"
 case "$DATAPLANE" in
-  linux-vxlan|pulsaros-dpdk) ;;
-  *) die "DATAPLANE must be linux-vxlan or pulsaros-dpdk, got: $DATAPLANE" ;;
+  linux-vxlan|pulsaros-dpdk|pulsaros-netstack) ;;
+  *) die "DATAPLANE must be linux-vxlan, pulsaros-dpdk, or pulsaros-netstack, got: $DATAPLANE" ;;
 esac
 export DATAPLANE
 
@@ -151,16 +151,19 @@ clone_vm() {
 
 configure_vm_profile_shape() {
   local host="$1" vmid="$2"
-  local is_vtep
+  local workload_group is_dpdk_workload
 
-  if [[ "$DATAPLANE" != "pulsaros-dpdk" ]]; then
-    return 0
-  fi
+  case "$DATAPLANE" in
+    pulsaros-dpdk) workload_group=vteps ;;
+    pulsaros-netstack) workload_group=netstacks ;;
+    linux-vxlan) return 0 ;;
+  esac
 
   case "$KERNEL_DPDK_PROFILE" in
     dpdk-vm)
-      is_vtep=$(jq -r --arg host "$host" '.hosts[$host].groups // [] | index("vteps") != null' artifacts/topology.json)
-      if [[ "$is_vtep" != "true" ]]; then
+      is_dpdk_workload=$(jq -r --arg host "$host" --arg group "$workload_group" \
+        '.hosts[$host].groups // [] | index($group) != null' artifacts/topology.json)
+      if [[ "$is_dpdk_workload" != "true" ]]; then
         return 0
       fi
       log "Sizing $host ($vmid) for dpdk-vm profile: 4 cores, 6144 MB RAM, balloon disabled"

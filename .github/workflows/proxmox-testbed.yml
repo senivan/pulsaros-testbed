@@ -11,6 +11,7 @@ on:
         options:
           - kernel-smoke
           - dpdk-smoke
+          - netstack-smoke
           - topology-checks
           - full
       topology:
@@ -18,13 +19,14 @@ on:
         required: true
         default: "vxlan-reference"
       dataplane:
-        description: "VXLAN dataplane implementation"
+        description: "Dataplane implementation"
         required: true
         default: "linux-vxlan"
         type: choice
         options:
           - linux-vxlan
           - pulsaros-dpdk
+          - pulsaros-netstack
       template_vmid:
         description: "Proxmox template VMID"
         required: true
@@ -41,10 +43,6 @@ on:
         options:
           - "0"
           - "1"
-      ansible_forks:
-        description: "Parallel Ansible forks for VM provisioning"
-        required: true
-        default: "20"
       collect_jobs:
         description: "Parallel host log collection workers"
         required: true
@@ -121,6 +119,14 @@ on:
         default: "https://github.com/senivan/PulsarOS-vxlan.git"
       pulsaros_vxlan_ref:
         description: "PulsarOS VXLAN git ref"
+        required: true
+        default: "main"
+      pulsaros_netstack_repo:
+        description: "PulsarOS netstack git repository"
+        required: true
+        default: "https://github.com/senivan/PulsarOS-netstack.git"
+      pulsaros_netstack_ref:
+        description: "PulsarOS netstack git ref"
         required: true
         default: "main"
       keep_vms_on_failure:
@@ -252,7 +258,7 @@ jobs:
       TEMPLATE_ID: ${{ inputs.template_vmid }}
       STORAGE: ${{ inputs.storage }}
       PVE_FULL_CLONE: ${{ inputs.pve_full_clone }}
-      ANSIBLE_FORKS: ${{ inputs.ansible_forks }}
+      ANSIBLE_FORKS: ${{ vars.ANSIBLE_FORKS || '20' }}
       PVE_COLLECT_JOBS: ${{ inputs.collect_jobs }}
       PVE_DESTROY_JOBS: ${{ inputs.destroy_jobs }}
       MGMT_BRIDGE: ${{ inputs.mgmt_bridge }}
@@ -267,6 +273,8 @@ jobs:
       KERNEL_DPDK_PROFILE: ${{ inputs.kernel_dpdk_profile }}
       PULSAROS_VXLAN_REPO: ${{ inputs.pulsaros_vxlan_repo }}
       PULSAROS_VXLAN_REF: ${{ inputs.pulsaros_vxlan_ref }}
+      PULSAROS_NETSTACK_REPO: ${{ inputs.pulsaros_netstack_repo }}
+      PULSAROS_NETSTACK_REF: ${{ inputs.pulsaros_netstack_ref }}
 
     steps:
       - name: Checkout repository

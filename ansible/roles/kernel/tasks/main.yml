@@ -17,7 +17,11 @@
 
 - name: Select host kernel DPDK profile
   ansible.builtin.set_fact:
-    kernel_dpdk_profile: "{{ kernel_dpdk_profile_requested if kernel_dataplane == 'pulsaros-dpdk' and 'vteps' in group_names else 'none' }}"
+    kernel_dpdk_profile: >-
+      {{ kernel_dpdk_profile_requested
+         if (kernel_dataplane == 'pulsaros-dpdk' and 'vteps' in group_names)
+         or (kernel_dataplane == 'pulsaros-netstack' and 'netstacks' in group_names)
+         else 'none' }}
 
 - name: Report template kernel path
   ansible.builtin.debug:

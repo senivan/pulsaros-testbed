@@ -1,0 +1,204 @@
+---
+- name: Validate PulsarOS netstack variables
+  ansible.builtin.assert:
+    that:
+      - dataplane_mac is defined
+      - management_mac is defined
+      - netstack_ip is defined
+      - dataplane_mac | lower != management_mac | lower
+    fail_msg: "pulsaros-netstack requires distinct dataplane_mac and management_mac plus netstack_ip"
+
+- name: Install PulsarOS netstack build prerequisites
+  ansible.builtin.dnf:
+    name:
+      - cmake
+      - coreutils
+      - dpdk
+      - dpdk-devel
+      - gcc
+      - git
+      - make
+      - numactl-devel
+      - pciutils
+      - pkgconf-pkg-config
+    state: present
+
+- name: Clone PulsarOS netstack repository
+  ansible.builtin.git:
+    repo: "{{ lookup('ansible.builtin.env', 'PULSAROS_NETSTACK_REPO') | default('https://github.com/senivan/PulsarOS-netstack.git', true) }}"
+    version: "{{ lookup('ansible.builtin.env', 'PULSAROS_NETSTACK_REF') | default('main', true) }}"
+    dest: /opt/pulsaros/netstack/source
+    force: true
+    update: true
+
+- name: Build and install PulsarOS netstack
+  ansible.builtin.shell: |
+    set -euo pipefail
+    source_dir=/opt/pulsaros/netstack/source
+    build_dir=/opt/pulsaros/netstack/build
+    cmake -S "$source_dir" -B "$build_dir" \
+      -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+      -DBUILD_TESTING=OFF
+    cmake --build "$build_dir" --target netstack-dp
+    install -D -m 0755 "$build_dir/netstack-dp" /usr/local/libexec/pulsaros/netstack/netstack-dp
+    ln -sfn /usr/local/libexec/pulsaros/netstack/netstack-dp /usr/local/bin/pulsaros-netstack-dp
+  args:
+    executable: /bin/bash
+  changed_when: true
+
+- name: Bind netstack dataplane PCI function to UIO
+  ansible.builtin.shell: |
+    set -euo pipefail
+    python3 - <<'PY'
+    import json
+    import os
+    import subprocess
+    from pathlib import Path
+
+    dataplane_mac = os.environ["DATAPLANE_MAC"].lower()
+    management_mac = os.environ["MANAGEMENT_MAC"].lower()
+    if dataplane_mac == management_mac:
+        raise SystemExit("management NIC was selected as the netstack dataplane")
+
+    def iface_by_mac(mac):
+        for path in Path("/sys/class/net").iterdir():
+            try:
+                if (path / "address").read_text().strip().lower() == mac:
+                    return path
+            except FileNotFoundError:
+                continue
+        return None
+
+    def pci_parent(iface):
+        device = (iface / "device").resolve()
+        for candidate in (device, *device.parents):
+            if (Path("/sys/bus/pci/devices") / candidate.name).exists():
+                return candidate.name
+        raise SystemExit(f"{iface.name} has no PCI parent")
+
+    management_iface = iface_by_mac(management_mac)
+    if management_iface is None:
+        raise SystemExit(f"management interface with MAC {management_mac} was not found")
+
+    output = Path("/etc/pulsaros/netstack/pci-map.json")
+    dataplane_iface = iface_by_mac(dataplane_mac)
+    if dataplane_iface is not None:
+        if dataplane_iface == management_iface:
+            raise SystemExit("resolved dataplane interface is the management interface")
+        bdf = pci_parent(dataplane_iface)
+        iface_name = dataplane_iface.name
+        kernel_bound = True
+    elif output.exists():
+        saved = json.loads(output.read_text()).get("port", {})
+        if saved.get("mac", "").lower() != dataplane_mac:
+            raise SystemExit(f"saved PCI mapping does not match {dataplane_mac}")
+        bdf = saved.get("pci")
+        iface_name = saved.get("iface")
+        if not bdf or not iface_name:
+            raise SystemExit("saved PCI mapping is incomplete")
+        kernel_bound = False
+    else:
+        raise SystemExit(f"dataplane interface with MAC {dataplane_mac} was not found")
+
+    device = Path("/sys/bus/pci/devices") / str(bdf)
+    if not device.exists():
+        raise SystemExit(f"dataplane port does not resolve to a PCI function: {bdf}")
+    if (device / "vendor").read_text().strip().lower() != "0x1af4":
+        raise SystemExit(f"selected dataplane PCI function is not virtio: {bdf}")
+
+    subprocess.run(["modprobe", "uio_pci_generic"], check=True)
+    if kernel_bound:
+        subprocess.run(["ip", "link", "set", iface_name, "nomaster"], check=False)
+        subprocess.run(["ip", "addr", "flush", "dev", iface_name], check=True)
+        subprocess.run(["ip", "link", "set", iface_name, "down"], check=True)
+
+    driver_link = device / "driver"
+    current = driver_link.resolve().name if driver_link.exists() else None
+    if current != "uio_pci_generic":
+        (device / "driver_override").write_text("uio_pci_generic\n")
+        if driver_link.exists():
+            (driver_link.resolve() / "unbind").write_text(f"{bdf}\n")
+        Path("/sys/bus/pci/drivers_probe").write_text(f"{bdf}\n")
+    current = driver_link.resolve().name if driver_link.exists() else None
+    if current != "uio_pci_generic":
+        raise SystemExit(f"failed to bind {bdf} to uio_pci_generic")
+    if iface_by_mac(management_mac) is None:
+        raise SystemExit("management NIC disappeared while binding dataplane NIC")
+
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps({"port": {
+        "mac": dataplane_mac,
+        "iface": iface_name,
+        "pci": bdf,
+    }}, indent=2, sort_keys=True) + "\n")
+    PY
+  args:
+    executable: /bin/bash
+  environment:
+    DATAPLANE_MAC: "{{ dataplane_mac }}"
+    MANAGEMENT_MAC: "{{ management_mac }}"
+  changed_when: true
+
+- name: Render PulsarOS netstack configuration
+  ansible.builtin.shell: |
+    set -euo pipefail
+    python3 - <<'PY'
+    import json
+    import os
+    from pathlib import Path
+
+    mapping = json.loads(Path("/etc/pulsaros/netstack/pci-map.json").read_text())
+    config = (
+        f"lcore={os.environ['NETSTACK_LCORE']}\n"
+        "pmd=physical\n"
+        f"device={mapping['port']['pci']}\n"
+        f"ip={os.environ['NETSTACK_IP']}\n"
+    )
+    Path("/etc/pulsaros/netstack/netstack.conf").write_text(config)
+    PY
+  args:
+    executable: /bin/bash
+  environment:
+    NETSTACK_LCORE: "{{ lookup('ansible.builtin.env', 'PULSAROS_NETSTACK_LCORE') | default('0', true) }}"
+    NETSTACK_IP: "{{ netstack_ip }}"
+  changed_when: true
+
+- name: Install PulsarOS netstack systemd service
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/pulsaros-netstack.service
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=PulsarOS DPDK host netstack
+      After=network.target
+
+      [Service]
+      Type=simple
+      ExecStart=/usr/bin/stdbuf -oL -eL /usr/local/libexec/pulsaros/netstack/netstack-dp /etc/pulsaros/netstack/netstack.conf
+      Restart=on-failure
+      RestartSec=2
+      LimitMEMLOCK=infinity
+
+      [Install]
+      WantedBy=multi-user.target
+
+- name: Enable and start PulsarOS netstack service
+  ansible.builtin.systemd:
+    name: pulsaros-netstack
+    daemon_reload: true
+    enabled: true
+    state: restarted
+
+- name: Verify PulsarOS netstack initialization
+  ansible.builtin.shell: |
+    set -euo pipefail
+    systemctl is-active --quiet pulsaros-netstack
+    journalctl -b -u pulsaros-netstack --no-pager | grep -Fq \
+      'initialized one DPDK port; entering host input loop'
+  args:
+    executable: /bin/bash
+  register: pulsaros_netstack_service_ready
+  changed_when: false
+  retries: 10
+  delay: 1
+  until: pulsaros_netstack_service_ready.rc == 0

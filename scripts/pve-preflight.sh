@@ -27,8 +27,8 @@ fi
 TOPOLOGY="${TOPOLOGY:-vxlan-reference}"
 DATAPLANE="${DATAPLANE:-linux-vxlan}"
 case "$DATAPLANE" in
-  linux-vxlan|pulsaros-dpdk) ;;
-  *) die "DATAPLANE must be linux-vxlan or pulsaros-dpdk, got: $DATAPLANE" ;;
+  linux-vxlan|pulsaros-dpdk|pulsaros-netstack) ;;
+  *) die "DATAPLANE must be linux-vxlan, pulsaros-dpdk, or pulsaros-netstack, got: $DATAPLANE" ;;
 esac
 TOPOLOGY_FILE="${TOPOLOGY_FILE:-topologies/${TOPOLOGY}.yml}"
 [[ -f "$TOPOLOGY_FILE" ]] || die "topology file not found: $TOPOLOGY_FILE"

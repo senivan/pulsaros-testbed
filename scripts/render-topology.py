@@ -18,7 +18,7 @@ INVENTORY = ROOT / "ansible" / "inventory.generated.ini"
 PLAYBOOK = ROOT / "ansible" / "site.generated.yml"
 TOPOLOGY_JSON = ARTIFACTS / "topology.json"
 TOPOLOGY_ENV = ARTIFACTS / "topology.env"
-DATAPLANES = ("linux-vxlan", "pulsaros-dpdk")
+DATAPLANES = ("linux-vxlan", "pulsaros-dpdk", "pulsaros-netstack")
 
 
 def die(message):
@@ -748,7 +748,9 @@ def render(topology_path, previous=None, dataplane=None):
     segments = validate_segments(hosts, source.get("segments", {}))
     resolved_segments = resolve_segments(hosts, segments)
     requested_control_plane = source.get("control_plane")
-    if dataplane == "pulsaros-dpdk":
+    if dataplane == "linux-vxlan":
+        pass
+    elif dataplane in ("pulsaros-dpdk", "pulsaros-netstack"):
         requested_control_plane = {"type": "static"}
     control_plane = validate_control_plane(hosts, resolved_segments, requested_control_plane)
     resolved = {
